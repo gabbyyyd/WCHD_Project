@@ -44,7 +44,7 @@ class Fund(models.Model):
         max_digits=15, decimal_places=2, verbose_name="Cash Balance"
     )
     fund_total = models.DecimalField(
-        max_digits=15, decimal_places=2, verbose_name="Total Given"
+        max_digits=15, decimal_places=2, verbose_name="Revenue"
     )
     # fund_budgeted = models.DecimalField(max_digits=15, decimal_places=2, verbose_name="Budgeted")
     dept = models.ForeignKey(
