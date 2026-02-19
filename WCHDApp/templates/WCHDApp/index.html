@@ -12,7 +12,9 @@
 
 <nav class="hubNavbar-top">
     <div class="hubNavbar-left">
-        <div id="liveTime" style="width: 120px; font-size: 18px; font-family: 'Roboto Mono', monospace; text-align: center;">00:00:00 AM</div>
+        <div id="liveTime"
+            style="width: 120px; font-size: 18px; font-family: 'Roboto Mono', monospace; text-align: center;">00:00:00
+            AM</div>
         <div id="liveDate" style="font-size: 15px; margin-top: 2px;"></div>
     </div>
     <div class="hubNavbar-center">
@@ -28,28 +30,23 @@
         </select>
     </div>
     <div class="hubNavbar-right">
-        <span
-          class="cursive-welcome"
-          style="font-family: 'Great Vibes', cursive; font-size: 1.6rem;"
-        >
-          Welcome, {{ request.user }}
+        <span class="cursive-welcome" style="font-family: 'Great Vibes', cursive; font-size: 1.6rem;">
+            Welcome, {{ request.user }}
         </span><br>
         <div style="display: flex; align-items: center; gap: 8px; margin-top: 1px;">
-          <p style="font-size: 10px; text-align: left; margin: 0; color: grey;">
-            Session time: <span id="sessionTimeValue">{{ duration }}</span>
-          </p>
-          <button
-            id="toggleSessionTime"
-            style="padding: 2px 6px; font-size: 12px; background-color: transparent; border: none; cursor: pointer;"
-            title="Click to hide your session time"
-          >
-            🚫
-          </button>
+            <p style="font-size: 10px; text-align: left; margin: 0; color: grey;">
+                Session time: <span id="sessionTimeValue">{{ duration }}</span>
+            </p>
+            <button id="toggleSessionTime"
+                style="padding: 2px 6px; font-size: 12px; background-color: transparent; border: none; cursor: pointer;"
+                title="Click to hide your session time">
+            </button>
         </div>
         <div style="display: flex; align-items: center; gap: 8px; margin-top: 1px;">
-            <a href="{% url 'admin:index' %}" style="font-size: 10px; text-align: left; margin: 0; color: grey;">Admin Page</a>
+            <a href="{% url 'admin:index' %}" style="font-size: 10px; text-align: left; margin: 0; color: grey;">Admin
+                Page</a>
         </div>
-      </div>
+    </div>
     </div>
 </nav>
 
@@ -91,52 +88,52 @@
             <div class="box" data-id="grantStats"><a href="{% url 'grantStats' %}">Grant Stats</a></div>
             <div class="box" data-id="viewByYear"><a href="{% url 'viewByYear' %}">New Year Creation</a></div>
         </div>
-        
+
         <script>document.addEventListener('DOMContentLoaded', () => {
-            const boxes = document.querySelectorAll('.box');
-            let draggedItem = null;
-          
-            boxes.forEach(box => {
-              box.setAttribute('draggable', true);
-          
-              box.addEventListener('dragstart', (e) => {
-                draggedItem = box;
-                box.classList.add('dragging');
-                boxes.forEach(b => {
-                  if (b !== box) b.classList.add('sad-grey');
+                const boxes = document.querySelectorAll('.box');
+                let draggedItem = null;
+
+                boxes.forEach(box => {
+                    box.setAttribute('draggable', true);
+
+                    box.addEventListener('dragstart', (e) => {
+                        draggedItem = box;
+                        box.classList.add('dragging');
+                        boxes.forEach(b => {
+                            if (b !== box) b.classList.add('sad-grey');
+                        });
+                        e.dataTransfer.effectAllowed = 'move';
+                    });
+
+                    box.addEventListener('dragend', () => {
+                        box.classList.remove('dragging');
+                        boxes.forEach(b => b.classList.remove('sad-grey'));
+                        draggedItem = null;
+                    });
+
+                    box.addEventListener('dragover', (e) => {
+                        e.preventDefault();
+                        e.dataTransfer.dropEffect = 'move';
+                    });
+
+                    box.addEventListener('drop', (e) => {
+                        e.preventDefault();
+                        if (draggedItem && draggedItem !== box) {
+                            const container = document.getElementById('dragBoxContainer');
+                            const boxesArray = Array.from(container.querySelectorAll('.box'));
+                            const draggedIndex = boxesArray.indexOf(draggedItem);
+                            const targetIndex = boxesArray.indexOf(box);
+
+                            if (draggedIndex < targetIndex) {
+                                container.insertBefore(draggedItem, box.nextSibling);
+                            } else {
+                                container.insertBefore(draggedItem, box);
+                            }
+                        }
+                    });
                 });
-                e.dataTransfer.effectAllowed = 'move';
-              });
-          
-              box.addEventListener('dragend', () => {
-                box.classList.remove('dragging');
-                boxes.forEach(b => b.classList.remove('sad-grey'));
-                draggedItem = null;
-              });
-          
-              box.addEventListener('dragover', (e) => {
-                e.preventDefault();
-                e.dataTransfer.dropEffect = 'move';
-              });
-          
-              box.addEventListener('drop', (e) => {
-                e.preventDefault();
-                if (draggedItem && draggedItem !== box) {
-                  const container = document.getElementById('dragBoxContainer');
-                  const boxesArray = Array.from(container.querySelectorAll('.box'));
-                  const draggedIndex = boxesArray.indexOf(draggedItem);
-                  const targetIndex = boxesArray.indexOf(box);
-          
-                  if (draggedIndex < targetIndex) {
-                    container.insertBefore(draggedItem, box.nextSibling);
-                  } else {
-                    container.insertBefore(draggedItem, box);
-                  }
-                }
-              });
             });
-          });
-          </script>
+        </script>
 
         <button id="resetOrderBtn" style="
             position: fixed;
@@ -160,121 +157,121 @@
 </div>
 
 <script>
-document.addEventListener('DOMContentLoaded', function () {
-    const body = document.body;
-    const container = document.getElementById('dragBoxContainer');
-    const resetBtn = document.getElementById('resetOrderBtn');
-    const toggleSessionBtn = document.getElementById('toggleSessionTime');
-    const sessionValue = document.getElementById('sessionTimeValue');
-    const liveTimeEl = document.getElementById('liveTime');
-    const liveDateEl = document.getElementById('liveDate');
+    document.addEventListener('DOMContentLoaded', function () {
+        const body = document.body;
+        const container = document.getElementById('dragBoxContainer');
+        const resetBtn = document.getElementById('resetOrderBtn');
+        const toggleSessionBtn = document.getElementById('toggleSessionTime');
+        const sessionValue = document.getElementById('sessionTimeValue');
+        const liveTimeEl = document.getElementById('liveTime');
+        const liveDateEl = document.getElementById('liveDate');
 
-    function updateTime() {
-        const now = new Date();
-        let hours = now.getHours();
-        const minutes = now.getMinutes().toString().padStart(2, '0');
-        const seconds = now.getSeconds().toString().padStart(2, '0');
-        const ampm = hours >= 12 ? 'PM' : 'AM';
-        hours = hours % 12 || 12;
-        liveTimeEl.innerText = `${hours}:${minutes}:${seconds} ${ampm}`;
-    }
-
-    function updateDate() {
-        const now = new Date();
-        const month = (now.getMonth() + 1).toString().padStart(2, '0');
-        const day = now.getDate().toString().padStart(2, '0');
-        const year = now.getFullYear();
-        liveDateEl.innerText = `${month}/${day}/${year}`;
-    }
-
-    if (localStorage.getItem('loginDate') !== new Date().toDateString()) {
-        localStorage.setItem('loginDate', new Date().toDateString());
-        localStorage.setItem('loginTime', Date.now());
-    }
-    const startTime = parseInt(localStorage.getItem('loginTime'), 10) || Date.now();
-
-    function updateSessionTime() {
-        const now = Date.now();
-        const diff = now - startTime;
-        const h = Math.floor(diff / 3600000);
-        const m = Math.floor((diff % 3600000) / 60000);
-        const s = Math.floor((diff % 60000) / 1000);
-        sessionValue.innerText = `${h}h ${m}m ${s}s`;
-        if (h >= 8) {
-            sessionValue.style.color = 'red';
-        } else {
-            sessionValue.style.color = '';
+        function updateTime() {
+            const now = new Date();
+            let hours = now.getHours();
+            const minutes = now.getMinutes().toString().padStart(2, '0');
+            const seconds = now.getSeconds().toString().padStart(2, '0');
+            const ampm = hours >= 12 ? 'PM' : 'AM';
+            hours = hours % 12 || 12;
+            liveTimeEl.innerText = `${hours}:${minutes}:${seconds} ${ampm}`;
         }
-    }
 
-    updateTime();
-    updateDate();
-    updateSessionTime();
-    setInterval(updateTime, 1000);
-    setInterval(updateSessionTime, 1000);
-
-    toggleSessionBtn.addEventListener('click', () => {
-        const isHidden = sessionValue.style.display === 'none';
-        sessionValue.style.display = isHidden ? 'inline' : 'none';
-        toggleSessionBtn.title = isHidden ? 'Click to hide your session time' : 'Click to show your session time';
-        toggleSessionBtn.textContent = isHidden ? '🚫' : '👁️';
-        localStorage.setItem('sessionTimeHidden', !isHidden);
-    });
-
-    if (localStorage.getItem('sessionTimeHidden') === 'true') {
-        sessionValue.style.display = 'none';
-        toggleSessionBtn.title = 'Click to show your session time';
-        toggleSessionBtn.textContent = '👁️';
-    }
-
-    let sortableInstance;
-    function saveOrder() {
-        const order = Array.from(container.children).map(box => box.dataset.id);
-        localStorage.setItem('boxOrder', JSON.stringify(order));
-    }
-
-    function loadOrder() {
-        const savedOrder = JSON.parse(localStorage.getItem('boxOrder'));
-        if (savedOrder) {
-            const boxMap = {};
-            Array.from(container.children).forEach(box => {
-                if (box.dataset.id) boxMap[box.dataset.id] = box;
-            });
-            savedOrder.forEach(id => {
-                if (boxMap[id]) container.appendChild(boxMap[id]);
-            });
+        function updateDate() {
+            const now = new Date();
+            const month = (now.getMonth() + 1).toString().padStart(2, '0');
+            const day = now.getDate().toString().padStart(2, '0');
+            const year = now.getFullYear();
+            liveDateEl.innerText = `${month}/${day}/${year}`;
         }
-        if (!sortableInstance) {
-            sortableInstance = new Sortable(container, {
-                animation: 150,
-                ghostClass: 'sortable-ghost',
-                chosenClass: 'sortable-chosen',
-                dragClass: 'sortable-drag',
-                onEnd: saveOrder
-            });
+
+        if (localStorage.getItem('loginDate') !== new Date().toDateString()) {
+            localStorage.setItem('loginDate', new Date().toDateString());
+            localStorage.setItem('loginTime', Date.now());
         }
-    }
+        const startTime = parseInt(localStorage.getItem('loginTime'), 10) || Date.now();
 
-    loadOrder();
+        function updateSessionTime() {
+            const now = Date.now();
+            const diff = now - startTime;
+            const h = Math.floor(diff / 3600000);
+            const m = Math.floor((diff % 3600000) / 60000);
+            const s = Math.floor((diff % 60000) / 1000);
+            sessionValue.innerText = `${h}h ${m}m ${s}s`;
+            if (h >= 8) {
+                sessionValue.style.color = 'red';
+            } else {
+                sessionValue.style.color = '';
+            }
+        }
 
-    resetBtn.addEventListener('click', () => {
-        const boxes = Array.from(container.children);
-        boxes.forEach((box, i) => {
-            setTimeout(() => {
-                box.style.transition = 'transform 0.1s ease-out, background-color 0.1s ease-out';
-                box.style.transform = 'translateY(-10px)';
-                box.style.backgroundColor = '#ddd';
-            }, i * 30);
+        updateTime();
+        updateDate();
+        updateSessionTime();
+        setInterval(updateTime, 1000);
+        setInterval(updateSessionTime, 1000);
+
+        toggleSessionBtn.addEventListener('click', () => {
+            const isHidden = sessionValue.style.display === 'none';
+            sessionValue.style.display = isHidden ? 'inline' : 'none';
+            toggleSessionBtn.title = isHidden ? 'Click to hide your session time' : 'Click to show your session time';
+            toggleSessionBtn.textContent = isHidden ? '🚫' : '👁️';
+            localStorage.setItem('sessionTimeHidden', !isHidden);
         });
-        setTimeout(() => {
-            localStorage.removeItem('boxOrder');
-            location.reload();
-        }, boxes.length * 30 + 200);
-    });
 
-    if (typeof initTheme === 'function') initTheme();
-    if (typeof initColorPalette === 'function') initColorPalette();
-});
+        if (localStorage.getItem('sessionTimeHidden') === 'true') {
+            sessionValue.style.display = 'none';
+            toggleSessionBtn.title = 'Click to show your session time';
+            toggleSessionBtn.textContent = '👁️';
+        }
+
+        let sortableInstance;
+        function saveOrder() {
+            const order = Array.from(container.children).map(box => box.dataset.id);
+            localStorage.setItem('boxOrder', JSON.stringify(order));
+        }
+
+        function loadOrder() {
+            const savedOrder = JSON.parse(localStorage.getItem('boxOrder'));
+            if (savedOrder) {
+                const boxMap = {};
+                Array.from(container.children).forEach(box => {
+                    if (box.dataset.id) boxMap[box.dataset.id] = box;
+                });
+                savedOrder.forEach(id => {
+                    if (boxMap[id]) container.appendChild(boxMap[id]);
+                });
+            }
+            if (!sortableInstance) {
+                sortableInstance = new Sortable(container, {
+                    animation: 150,
+                    ghostClass: 'sortable-ghost',
+                    chosenClass: 'sortable-chosen',
+                    dragClass: 'sortable-drag',
+                    onEnd: saveOrder
+                });
+            }
+        }
+
+        loadOrder();
+
+        resetBtn.addEventListener('click', () => {
+            const boxes = Array.from(container.children);
+            boxes.forEach((box, i) => {
+                setTimeout(() => {
+                    box.style.transition = 'transform 0.1s ease-out, background-color 0.1s ease-out';
+                    box.style.transform = 'translateY(-10px)';
+                    box.style.backgroundColor = '#ddd';
+                }, i * 30);
+            });
+            setTimeout(() => {
+                localStorage.removeItem('boxOrder');
+                location.reload();
+            }, boxes.length * 30 + 200);
+        });
+
+        if (typeof initTheme === 'function') initTheme();
+        if (typeof initColorPalette === 'function') initColorPalette();
+    });
 </script>
 
 <script src="{% static 'WCHDApp/js/themeHandler.js' %}"></script>
