@@ -629,7 +629,6 @@ def transactionsView(request):
     message = ""
     revenueModel = apps.get_model('WCHDApp', "revenue")
     itemID = request.GET.get('itemSelect')
-    sort_by = request.GET.get('sort_by')
     revenueValues = revenueModel.objects.filter(item_id=itemID)
 
     #Getting just field names from model
@@ -639,22 +638,6 @@ def transactionsView(request):
     fieldNames = []
     decimalFields = []
     aliasNames = []
-
-    #Filter for sorting by date range
-    start_date = request.GET.get('start_date')
-    end_date = request.GET.get('end_date')
-
-    if start_date and end_date:
-        revenueValues = revenueValues.filter(date__range=[start_date, end_date])
-    elif start_date:
-        revenueValues = revenueValues.filter(date__gte=start_date)
-    elif end_date:
-        revenueValues = revenueValues.filter(date__lte=end_date)
-
-    revenueValues = revenueValues.order_by("date")
-
-    if sort_by:
-        revenueValues = revenueValues.order_by(sort_by)
 
     #Fields that should be accumulated
     summedFields = {
@@ -703,28 +686,8 @@ def transactionsView(request):
     else:
         form = RevenueForm()
 
-    context = {
-        "itemObj": item,
-        "item": itemID,
-        "revenue": revenueValues,  # optional, for other purposes
-        "data": revenueValues,     # <--- THIS MUST BE THE FILTERED QUERYSET
-        "fields": fieldNames,
-        "aliasNames": aliasNames,
-        "decimalFields": decimalFields,
-        "form": form,
-        "message": message
-    }
-
     #return render(request, "WCHDApp/transactionsView.html", {"item": itemID, "revenue": revenueValues,"fields": fieldNames, "aliasNames": aliasNames, "data": revenueValues, "decimalFields": decimalFields, "form":form})
-    #return render(request, "WCHDApp/partials/revenueTableAndForm.html", {"itemObj":item, "item": itemID, "revenue": revenueValues,"fields": fieldNames, "aliasNames": aliasNames, "data": revenueValues, "decimalFields": decimalFields, "form":form, "message":message})
-    # Detect HTMX requests
-    """if request.headers.get("HX-Request"):
-        # Return only the partial for HTMX swaps
-        return render(request, "WCHDApp/partials/revenueTableAndForm.html", context)
-    else:
-        # Return full page for normal GET
-        return render(request, "WCHDApp/transactionsView.html", context)"""
-    return render(request, "WCHDApp/partials/revenueTableAndForm.html", context)
+    return render(request, "WCHDApp/partials/revenueTableAndForm.html", {"itemObj":item, "item": itemID, "revenue": revenueValues,"fields": fieldNames, "aliasNames": aliasNames, "data": revenueValues, "decimalFields": decimalFields, "form":form, "message":message})
 
 #Used to create a people form within another form for entry time creation
 def addPeopleForm(request):

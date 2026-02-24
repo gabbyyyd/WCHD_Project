@@ -1,40 +1,6 @@
 {% load static %}
 {% load custom_filters %}
-
 <div id="tableAndForm">
-
-    <!-- method="GET" action="{% url 'transactionsView' %}" class="mb-3"-->
-
-    <form hx-get="{% url 'transactionsView' %}"
-        hx-target="#tableAndForm"
-        hx-swap="outerHTML">
-        
-        <input type="hidden" name="itemSelect" value = "{{ itemObj.item_id }}">
-        <label>Start Date:</label>
-        <input type="date" name="start_date" value="{{ request.GET.start_date }}">
-        <label>End Date:</label>
-        <input type="date" name="end_date" value="{{ request.GET.end_date }}">
-
-        <label>Sort By:</label>
-    <select 
-        name="sort_by" 
-        hx-trigger="change"
-        hx-get="{% url 'transactionsView' %}"
-        hx-target="#tableAndForm"
-        hx-swap="outerHTML"
-    >
-        <option value="">Default</option>
-        <option value="date" {% if request.GET.sort_by == "date" %}selected{% endif %}>Date (Oldest)</option>
-        <option value="-date" {% if request.GET.sort_by == "-date" %}selected{% endif %}>Date (Newest)</option>
-        <option value="amount" {% if request.GET.sort_by == "amount" %}selected{% endif %}>Amount (Low → High)</option>
-        <option value="-amount" {% if request.GET.sort_by == "-amount" %}selected{% endif %}>Amount (High → Low)</option>
-        <option value="payType" {% if request.GET.sort_by == "payType" %}selected{% endif %}>Payment Type (Alphabetical)</option>
-        <option value="-payType" {% if request.GET.sort_by == "-payType" %}selected{% endif %}>Payment Type (Reverse Alphabetical)</option>
-        <option value="item" {% if request.GET.sort_by == "item" %}selected{% endif %}>Item (Alphabetical)</option>
-        <option value="-item" {% if request.GET.sort_by == "-item" %}selected{% endif %}>Item (Reverse Alphabetical)</option>
-    </select>
-    <button type="submit">Filter</button>
-    </form>
     <table border="1">
         <tr>
             {% for field in aliasNames%}

@@ -20,7 +20,6 @@ class Variable(models.Model):
         return self.name
 
     class Meta:
-        ordering = ["name"]
         db_table = "Variables"
 
 
@@ -33,7 +32,6 @@ class Dept(models.Model):
         return self.dept_name
 
     class Meta:
-        ordering = ["dept_name"]
         db_table = "Departments"
 
 
@@ -46,7 +44,7 @@ class Fund(models.Model):
         max_digits=15, decimal_places=2, verbose_name="Cash Balance"
     )
     fund_total = models.DecimalField(
-        max_digits=15, decimal_places=2, verbose_name="Revenue"
+        max_digits=15, decimal_places=2, verbose_name="Total Given"
     )
     # fund_budgeted = models.DecimalField(max_digits=15, decimal_places=2, verbose_name="Budgeted")
     dept = models.ForeignKey(
@@ -116,7 +114,6 @@ class Fund(models.Model):
         return f"({self.fund_id}) {self.fund_name}"
 
     class Meta:
-        ordering = ["fund_name"]
         db_table = "Funds"
 
 
@@ -134,7 +131,6 @@ class Line(models.Model):
     # line_encumbered = models.DecimalField(max_digits=15, decimal_places=2, verbose_name="Encumbered")
     # line_budget_spent = models.DecimalField(max_digits=15, decimal_places=2, verbose_name="Budget Spent", default=0)
     # line_total_income = models.DecimalField(max_digits=15, decimal_places=2, verbose_name="Total Income", default=0)
-    # hi
     dept = models.ForeignKey(
         Dept, on_delete=models.CASCADE, null=True, blank=True, verbose_name="Department"
     )
@@ -222,7 +218,6 @@ class Line(models.Model):
         return f"({self.line_id}) {self.line_name}"
 
     class Meta:
-        ordering = ["line_name"]
         db_table = "Lines"
 
 
@@ -257,7 +252,6 @@ class Item(models.Model):
         return f"({self.item_id}) {self.item_name}"
 
     class Meta:
-        ordering = ["item_name"]
         db_table = "Items"
 
 
@@ -320,7 +314,6 @@ class Employee(models.Model):
         return f"{self.first_name} {self.surname}"
 
     class Meta:
-        ordering = ["surname", "first_name"]
         db_table = "Employees"
 
 
@@ -345,7 +338,6 @@ class People(models.Model):
         return self.name
 
     class Meta:
-        ordering = ["name"]
         db_table = "Peoples"
 
 
@@ -423,7 +415,6 @@ class ActivityList(models.Model):
         return self.program
 
     class Meta:
-        ordering = ["ActivityList_id"]
         db_table = "Activity List"
 
 
@@ -446,7 +437,6 @@ class PayPeriod(models.Model):
         )
 
     class Meta:
-        ordering = ["periodStart"]
         db_table = "PayPeriod"
 
 
@@ -485,7 +475,6 @@ class Payroll(models.Model):
         return self.employee.pay_rate
 
     class Meta:
-        ordering = ["beg_date"]
         db_table = "Payroll"
 
 
@@ -534,7 +523,6 @@ class Grant(models.Model):
         return f"({self.grant_id}) {self.grant_name}"
 
     class Meta:
-        ordering = ["grant_name"]
         db_table = "Grants"
 
 
@@ -619,7 +607,6 @@ class GrantLine(models.Model):
         return self.line_name
 
     class Meta:
-        ordering = ["grant"]
         db_table = "Grant Lines"
 
 
@@ -638,7 +625,6 @@ class GrantItem(models.Model):
     month = models.IntegerField(verbose_name="Month")
 
     class Meta:
-        ordering = ["item_name"]
         db_table = "Grant Items"
 
 
@@ -664,7 +650,6 @@ class BudgetActions(models.Model):
         return self.ba_id
 
     class Meta:
-        ordering = ["ba_id"]
         db_table = "Budget Actions"
 
 
@@ -692,7 +677,6 @@ class Carryover(models.Model):
         return self.co_id
 
     class Meta:
-        ordering = ["dept"]
         db_table = "Carryover"
 
 
@@ -859,7 +843,6 @@ class Benefits(models.Model):
         return self.employee
 
     class Meta:
-        ordering = ["employee"]
         db_table = "Benefits"
 
 
@@ -923,7 +906,6 @@ class Revenue(models.Model):
         return f"{self.people} - {self.line} - {self.date} - ${self.amount}"
 
     class Meta:
-        ordering = ["date"]
         db_table = "Revenue"
 
 
@@ -997,7 +979,6 @@ class Expense(models.Model):
         return f"{self.people} - {self.line} - {self.date} - ${self.amount}"
 
     class Meta:
-        ordering = ["date"]
         db_table = "Expense"
 
 
@@ -1034,5 +1015,4 @@ class Testing(models.Model):
         return self.fund.fund_cash_balance - 3
 
     class Meta:
-        ordering = ["testing_name"]
         db_table = "Testing"
