@@ -134,7 +134,7 @@ class Line(models.Model):
     # line_encumbered = models.DecimalField(max_digits=15, decimal_places=2, verbose_name="Encumbered")
     # line_budget_spent = models.DecimalField(max_digits=15, decimal_places=2, verbose_name="Budget Spent", default=0)
     # line_total_income = models.DecimalField(max_digits=15, decimal_places=2, verbose_name="Total Income", default=0)
-    # hi
+    # hi :)
     dept = models.ForeignKey(
         Dept, on_delete=models.CASCADE, null=True, blank=True, verbose_name="Department"
     )
