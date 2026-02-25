@@ -1606,9 +1606,9 @@ def grantStats(request):
         totalSpent = 0
         totalRemaining = 0
         for grantLine in grantLines:
-            totalRemaining += grantLine.line_budget_remaining
-            totalSpent += grantLine.line_budget_spent
-            totalBudgeted += grantLine.line_budgeted
+            totalRemaining += float(grantLine.budgetRemaining)
+            totalSpent += float(grantLine.budgetSpent)
+            totalBudgeted += float(grantLine.line_budgeted)
 
         grantDict = {
             "grantID": grant.grant_id,

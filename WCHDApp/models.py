@@ -521,7 +521,7 @@ class Grant(models.Model):
         return totalRemaining
 
     @property
-    def recieved(self):
+    def received(self):
         grantLines = GrantLine.objects.filter(
             grant__grant_id=self.grant_id, lineType="Revenue"
         )
