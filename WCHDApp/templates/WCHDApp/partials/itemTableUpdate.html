@@ -71,10 +71,5 @@
         Array.from(table.rows)
             .sort((a, b) => a.cells[0].textContent.localeCompare(b.cells[0]))
             .forEach(row => table.appendChild(row));
-
-        // Placeholder for PDF generation
-        document.getElementById("generate-pdf").addEventListener("click", function() {
-            alert("PDF generation functionality will go here.");
         });
-    });
 </script>
