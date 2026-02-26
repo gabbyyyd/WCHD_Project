@@ -631,6 +631,9 @@ def transactionsView(request):
     itemID = request.GET.get('itemSelect')
     sort_by = request.GET.get('sort_by')
     revenueValues = revenueModel.objects.filter(item_id=itemID)
+    accumulator = 0
+    for r in revenueValues:
+        accumulator += r.amount
 
     #Getting just field names from model
     fields = revenueModel._meta.get_fields()
@@ -712,7 +715,8 @@ def transactionsView(request):
         "aliasNames": aliasNames,
         "decimalFields": decimalFields,
         "form": form,
-        "message": message
+        "message": message,
+        "accumulator": accumulator,
     }
 
     #return render(request, "WCHDApp/transactionsView.html", {"item": itemID, "revenue": revenueValues,"fields": fieldNames, "aliasNames": aliasNames, "data": revenueValues, "decimalFields": decimalFields, "form":form})
@@ -773,6 +777,9 @@ def transactionsExpenseTableUpdate(request):
     #print(itemID)
     expenseModel = apps.get_model('WCHDApp', "expense")
     expenseValues = expenseModel.objects.filter(item_id=itemID)
+    accumulator = 0
+    for e in expenseValues:
+        accumulator += e.amount
 
     #Getting just field names from model
     fields = expenseModel._meta.get_fields()
@@ -843,6 +850,7 @@ def transactionsExpenseTableUpdate(request):
         "item": item,
         "message": message,
         "budgeted_remaining": line.budgetRemaining,
+        "accumulator" : accumulator,
     }
 
     return render(request, "WCHDApp/partials/transactionsTablePartial.html", context)
