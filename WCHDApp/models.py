@@ -11,8 +11,8 @@ class FundSource(models.TextChoices):
     STATE = "STATE"
     LOCAL = "LOCAL"
 
-
-class Variable(models.Model):
+# used to be called Variable
+class InsuranceRate(models.Model):
     name = models.CharField(max_length=50)
     value = models.DecimalField(max_digits=10, decimal_places=2)
 
@@ -21,7 +21,7 @@ class Variable(models.Model):
 
     class Meta:
         ordering = ["name"]
-        db_table = "Variables"
+        db_table = "Insurance Rate"
 
 
 # REMINDER TO TAKE OUT null=True and blank=True from all instances of dept once we have a department populated
@@ -829,9 +829,9 @@ class Benefits(models.Model):
         if rate == LifeInsurance.ineligible:
             factor = 0
         elif rate == LifeInsurance.rate1:
-            factor = Variable.objects.get(name="insuranceRate1").value
+            factor = InsuranceRate.objects.get(name="insuranceRate1").value
         elif rate == LifeInsurance.rate2:
-            factor = Variable.objects.get(name="insuranceRate2").value
+            factor = InsuranceRate.objects.get(name="insuranceRate2").value
 
         value = float(factor) / float(self.monthly_hours)
         return f"{value:.2f}"
