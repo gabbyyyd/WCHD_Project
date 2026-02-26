@@ -15,4 +15,23 @@
         <button type="submit" name="button" id="export" value="export">Export</button>
     </form>
     {{message}}
+    <script>
+    function toggleDateInputs() {
+        const tableSelect = document.getElementById("id_table");  // Django auto-generated ID
+        const startDate = document.getElementById("id_start_date"); // Django auto-generated ID
+        const endDate = document.getElementById("id_end_date");
+
+        if (tableSelect.value === "Revenue" || tableSelect.value === "Expense") {
+            startDate.parentElement.style.display = "block";  // show label + input
+            endDate.parentElement.style.display = "block";
+        } else {
+            startDate.parentElement.style.display = "none";
+            endDate.parentElement.style.display = "none";
+        }
+    }
+
+    // Trigger on change and on page load
+    document.getElementById("id_table").addEventListener("change", toggleDateInputs);
+    window.addEventListener("load", toggleDateInputs);
+    </script>
 {% endblock %}

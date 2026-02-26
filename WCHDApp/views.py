@@ -510,8 +510,20 @@ def exports(request):
             fileName = form.cleaned_data['fileName']
             
             model = apps.get_model('WCHDApp', tableName)
-            data = model.objects.all().values()
+            queryset = model.objects.all()
+            start_date = form.cleaned_data['start_date']
+            end_date = form.cleaned_data['end_date']
+
+            #If date filtering entered for Revenue or Expense, filter based on date range
+            if tableName in ["Revenue", "Expense"]:
+                if start_date:
+                    queryset = queryset.filter(date__gte=start_date)
+                if end_date:
+                    queryset = queryset.filter(date__lte=end_date)
+            data = queryset.values()
+            #data = model.objects.all().values()
             exportData = pd.DataFrame.from_records(data)
+
 
             #From what I read the 2 commented lines are how we can show it in a new tab before download
             #However, its raw text apparently browsers dont like not immediately downloading csv, could be useful for our reports though

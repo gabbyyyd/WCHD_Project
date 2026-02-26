@@ -70,6 +70,10 @@ class ExportSelect(forms.Form):
     table = forms.ChoiceField(choices=modelsDict, label="Select Table", required=True)
     fileName = forms.CharField(max_length=20, label="File Name (do not include .csv)", required=True)
 
+    #Optional Date Filtering
+    start_date = forms.DateField(label="Start Date (Optional)", required=False, widget=forms.DateInput(attrs={'type': 'date'}))
+    end_date = forms.DateField(label="End Date (Optional)", required=False, widget=forms.DateInput(attrs={'type': 'date'}))
+
     
 
     
