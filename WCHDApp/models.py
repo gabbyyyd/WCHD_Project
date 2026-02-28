@@ -882,7 +882,7 @@ class Revenue(models.Model):
     payType = models.CharField(
         max_length=20, choices=paymentType.choices, verbose_name="Payment Type"
     )
-    reference = models.IntegerField(verbose_name="Reference")
+    reference = models.CharField(max_length=50, verbose_name="Reference")
     comment = models.CharField(max_length=500, verbose_name="Comment")
     ActivityList = models.ForeignKey(
         ActivityList, on_delete=models.PROTECT, verbose_name="Activity List"
