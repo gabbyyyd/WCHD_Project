@@ -624,22 +624,7 @@ class GrantLine(models.Model):
 
 
 # Have a table made but dont use it right now
-class GrantItem(models.Model):
-    item_id = models.AutoField(primary_key=True, verbose_name="Item ID")
-    fund_type = models.CharField(
-        max_length=50, choices=FundSource.choices, verbose_name="Fund Type"
-    )
-    line = models.ForeignKey(Line, on_delete=models.CASCADE)
-    fund_year = models.IntegerField(verbose_name="Fund Year")
-    item_name = models.CharField(max_length=255, verbose_name="Item Name")
-    line_item = models.CharField(max_length=255, verbose_name="Line")
-    category = models.CharField(max_length=50, verbose_name="Category")
-    fee_based = models.BooleanField(verbose_name="Fee Based")
-    month = models.IntegerField(verbose_name="Month")
 
-    class Meta:
-        ordering = ["item_name"]
-        db_table = "Grant Items"
 
 
 class BudgetActions(models.Model):
