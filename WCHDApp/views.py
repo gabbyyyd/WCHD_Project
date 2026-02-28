@@ -1633,11 +1633,11 @@ def grantStats(request):
         grantDict = {
             "grantID": grant.grant_id,
             "grantName": grant.grant_name,
-            "awardAmount": grant.award_amount,
-            "spent": totalSpent,
-            "remaining": totalRemaining,
-            "budgeted": totalBudgeted,
-            "received": grant.received
+            "awardAmount": f"${grant.award_amount:,.2f}",
+            "spent": f"${totalSpent:,.2f}",
+            "remaining": f"${totalRemaining:,.2f}",
+            "budgeted": f"${totalBudgeted:,.2f}",
+            "received": f"${grant.received:,.2f}",
         }
 
         grantList.append(grantDict)
