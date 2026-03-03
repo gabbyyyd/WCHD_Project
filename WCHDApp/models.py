@@ -115,7 +115,7 @@ class Fund(models.Model):
         return f"({self.fund_id}) {self.fund_name}"
 
     class Meta:
-        ordering = ["fund_name"]
+        ordering = ["fund_id", "fund_name"]
         db_table = "Funds"
 
 

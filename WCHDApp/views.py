@@ -1820,7 +1820,7 @@ def testingGrantAccess(request):
 def viewByYear(request):
     currentDate = datetime.now()
     year = currentDate.year
-    years = list(range(2000, year+2))
+    years = list(range(2000, year+3))
 
     models = ["Fund", "Line", "Item"]
 
