@@ -26,8 +26,12 @@
             </tr>
         {% endfor %}
     </table>
-
-    <h3>Accumulator: {{accumulator}}</h3>
+    {% if tableName == "Fund" %}
+        <h3>Total Remaining: {{ total_remaining | money }}</h3>
+        <h3>Total Budgeted: {{ total_budgeted | money }}</h3>
+    {% else %}
+        <h3>Accumulator: {{accumulator | money }}</h3>
+    {% endif %}
 {% endblock %}
 
 

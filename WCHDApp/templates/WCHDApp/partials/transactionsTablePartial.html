@@ -21,7 +21,7 @@
         {% endfor %}
     </table>
     <h3>Remaining Available Budget: {{budgeted_remaining|money}}</h3>
-    <h3>Accumulator:</h3>
+    <h3>Accumulator: {{ accumulator | money }}</h3>
 
     <div class="FormContainer">
         <form method="POST" hx-post="{% url 'transactionsExpenseTableUpdate' %}?item={{ item.item_id }}"

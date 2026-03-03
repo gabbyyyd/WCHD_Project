@@ -27,11 +27,11 @@
     {% for grant in grantList %}
         <tr>
             <td>{{grant.grantName}}</td>
-            <td>$ {{grant.awardAmount}}</td>
-            <td>$ {{grant.received}}</td>
-            <td>$ {{grant.budgeted}}</td>
-            <td>$ {{grant.spent}}</td>
-            <td>$ {{grant.remaining}}</td>
+            <td> {{grant.awardAmount}}</td>
+            <td> {{grant.received}}</td>
+            <td> {{grant.budgeted}}</td>
+            <td> {{grant.spent}}</td>
+            <td> {{grant.remaining}}</td>
             <td><button hx-get="{% url 'grantBreakdown' %}?grantID={{ grant.grantID }}" hx-target="#breakdown">See Breakdown</button></td>
         </tr>
         

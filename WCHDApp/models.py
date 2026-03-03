@@ -4,6 +4,10 @@ from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from datetime import datetime
 from django.utils import timezone
+from decimal import Decimal
+from django.db.models import Sum
+from django.db.models.functions import Coalesce
+from django.db.models import Value
 
 
 class FundSource(models.TextChoices):
@@ -11,8 +15,8 @@ class FundSource(models.TextChoices):
     STATE = "STATE"
     LOCAL = "LOCAL"
 
-
-class Variable(models.Model):
+# used to be called Variable
+class InsuranceRate(models.Model):
     name = models.CharField(max_length=50)
     value = models.DecimalField(max_digits=10, decimal_places=2)
 
@@ -21,7 +25,7 @@ class Variable(models.Model):
 
     class Meta:
         ordering = ["name"]
-        db_table = "Variables"
+        db_table = "Insurance Rate"
 
 
 # REMINDER TO TAKE OUT null=True and blank=True from all instances of dept once we have a department populated
@@ -58,47 +62,42 @@ class Fund(models.Model):
     # mac_elig = models.BooleanField(blank=False, verbose_name="MACE")
 
     @property
-    def calcRemaining(self):
-        lines = self.lines.filter(lineType="Expense")
-        total = 0
-        for line in lines:
-            total += float(line.budgetSpent)
-        remaining = float(self.budgeted) - total
-        return f"{remaining:.2f}"
+    def budgeted(self):
+        # Sum of all expense line budgets for this fund
+        total = self.lines.filter(lineType="Expense").aggregate(
+            s=Coalesce(Sum("line_budgeted"), Value(Decimal("0.00")))
+        )["s"]
+        return total
+
 
     @property
-    def budgeted(self):
-        lines = self.lines.filter(fund__fund_id=self.fund_id)
-        total = 0
-        for line in lines:
-            total += float(line.line_budgeted)
+    def calcRemaining(self):
+        spent = Decimal("0.00")
+        for line in self.lines.filter(lineType="Expense"):
+            spent += Decimal(str(line.budgetSpent or 0))
 
-        return f"{total:.2f}"
+        return self.budgeted - spent
+
 
     @property
     def remainingToBudget(self):
-        total = float(self.fund_cash_balance) - float(self.budgeted)
-
-        return f"{total:.2f}"
+        # Cash balance - budgeted
+        return (self.fund_cash_balance or Decimal("0.00")) - self.budgeted
 
     @property
     def totalAvailable(self):
-        total = float(self.fund_cash_balance)
-        expenseLines = Line.objects.filter(
-            fund__fund_id=self.fund_id, lineType="Expense"
-        )
-        revenueLines = Line.objects.filter(
-            fund__fund_id=self.fund_id, lineType="Revenue"
-        )
+        total = self.fund_cash_balance or Decimal("0.00")
 
-        for line in expenseLines:
-            total -= float(line.line_budgeted)
+        expense_sum = self.lines.filter(lineType="Expense").aggregate(
+            s=Coalesce(Sum("line_budgeted"), Value(Decimal("0.00")))
+        )["s"]
 
-        for line in revenueLines:
-            total += float(line.line_budgeted)
+        revenue_sum = self.lines.filter(lineType="Revenue").aggregate(
+            s=Coalesce(Sum("line_budgeted"), Value(Decimal("0.00")))
+        )["s"]
 
-        return f"{total:.2f}"
-
+        return total - expense_sum + revenue_sum
+    
     def save(self, *args, **kwargs):
         # Check if this is the first time calling save on this object
         creating = self._state.adding
@@ -560,27 +559,23 @@ class GrantLine(models.Model):
 
     @property
     def budgetSpent(self):
-        expenses = Expense.objects.filter(grantLine__grantline_id=self.grantline_id)
-        total = 0
-        for expense in expenses:
-            total += expense.amount
-
-        return f"{total:.2f}"
-
-    @property
-    def budgetRemaining(self):
-        remaining = float(self.line_budgeted) - float(self.budgetSpent)
-
-        return f"{remaining:.2f}"
+        return (
+            Expense.objects
+            .filter(grantLine=self)
+            .aggregate(total=Coalesce(Sum("amount"), Value(Decimal("0.00"))))
+        )["total"]
 
     @property
     def totalIncome(self):
-        revenues = Revenue.objects.filter(grantLine__grantline_id=self.grantline_id)
-        total = 0
-        for revenue in revenues:
-            total += revenue.amount
+        return (
+            Revenue.objects
+            .filter(grantLine=self)
+            .aggregate(total=Coalesce(Sum("amount"), Value(Decimal("0.00"))))
+        )["total"]
 
-        return f"{total:.2f}"
+    @property
+    def budgetRemaining(self):
+        return (self.line_budgeted or Decimal("0.00")) - self.budgetSpent
 
     def clean(self):
         lines = GrantLine.objects.filter(grant=self.grant)
@@ -624,22 +619,7 @@ class GrantLine(models.Model):
 
 
 # Have a table made but dont use it right now
-class GrantItem(models.Model):
-    item_id = models.AutoField(primary_key=True, verbose_name="Item ID")
-    fund_type = models.CharField(
-        max_length=50, choices=FundSource.choices, verbose_name="Fund Type"
-    )
-    line = models.ForeignKey(Line, on_delete=models.CASCADE)
-    fund_year = models.IntegerField(verbose_name="Fund Year")
-    item_name = models.CharField(max_length=255, verbose_name="Item Name")
-    line_item = models.CharField(max_length=255, verbose_name="Line")
-    category = models.CharField(max_length=50, verbose_name="Category")
-    fee_based = models.BooleanField(verbose_name="Fee Based")
-    month = models.IntegerField(verbose_name="Month")
 
-    class Meta:
-        ordering = ["item_name"]
-        db_table = "Grant Items"
 
 
 class BudgetActions(models.Model):
@@ -689,7 +669,7 @@ class Carryover(models.Model):
     fy_end_date = models.DateField(verbose_name="Fiscal Year End Date")
 
     def __str__(self):
-        return self.co_id
+        return str(self.co_id)
 
     class Meta:
         ordering = ["dept"]
@@ -829,9 +809,9 @@ class Benefits(models.Model):
         if rate == LifeInsurance.ineligible:
             factor = 0
         elif rate == LifeInsurance.rate1:
-            factor = Variable.objects.get(name="insuranceRate1").value
+            factor = InsuranceRate.objects.get(name="insuranceRate1").value
         elif rate == LifeInsurance.rate2:
-            factor = Variable.objects.get(name="insuranceRate2").value
+            factor = InsuranceRate.objects.get(name="insuranceRate2").value
 
         value = float(factor) / float(self.monthly_hours)
         return f"{value:.2f}"
@@ -882,7 +862,7 @@ class Revenue(models.Model):
     payType = models.CharField(
         max_length=20, choices=paymentType.choices, verbose_name="Payment Type"
     )
-    reference = models.IntegerField(verbose_name="Reference")
+    reference = models.CharField(max_length=50, verbose_name="Reference")
     comment = models.CharField(max_length=500, verbose_name="Comment")
     ActivityList = models.ForeignKey(
         ActivityList, on_delete=models.PROTECT, verbose_name="Activity List"
