@@ -28,6 +28,9 @@ from django.utils.timezone import now
 from django.utils.dateparse import parse_datetime
 from django.core.exceptions import ValidationError
 import re
+from decimal import Decimal
+from django.db.models import Sum, Value
+from django.db.models.functions import Coalesce
 
 def generate_pdf(request, tableName):
     buffer = BytesIO()
@@ -348,6 +351,7 @@ def tableView(request, tableName):
         "Fund": "fund_cash_balance", 
         "Line": "line_total_income",
         "Transaction": "amount",
+        "BudgetActions": "amount",
     }
     
 
@@ -367,15 +371,33 @@ def tableView(request, tableName):
             fieldNames.append(property[0])
             decimalFields.append(property[0])
 
+    context = {
+        "fields" : fieldNames,
+        "aliasNames": aliasNames,
+        "data": values,
+        "tableName" : tableName,
+        "decimalFields" : decimalFields,
+    }
+    
+    if tableName == "Fund":
+        total_remaining = Decimal("0.00")
+        total_budgeted = Decimal("0.00")
+
+        for f in values:
+            total_remaining += (f.calcRemaining or Decimal("0.00"))
+            total_budgeted += (f.budgeted or Decimal("0.00"))
+
+        context["total_remaining"] = total_remaining
+        context["total_budgeted"] = total_budgeted
     #Getting values based on if we defined them in summedFields in order to make accumulator
     if tableName in summedFields:
         field = summedFields[tableName]
-        accumulator = 0
-        for value in values:
-            accumulator += getattr(value, field)
-        context = {"fields": fieldNames, "aliasNames": aliasNames, "data": values, "tableName": tableName, "decimalFields": decimalFields, "accumulator": accumulator}
-    else:
-        context = {"fields": fieldNames, "aliasNames": aliasNames, "data": values, "tableName": tableName, "decimalFields": decimalFields}
+
+        accumulator = values.aggregate(
+            total=Coalesce(Sum(field), Value(Decimal("0.00")))
+        )["total"]
+        context["accumulator"] = accumulator
+        
 
     return render(request, "WCHDApp/tableView.html", context)
 
@@ -1690,74 +1712,78 @@ def grantLineTableUpdate(request):
     message = ""
     grantID = request.GET.get("grant")
     grant = Grant.objects.get(pk=grantID)
-    
+
     grantLines = GrantLine.objects.filter(grant=grant)
 
-    #Getting just field names from model
     fields = GrantLine._meta.fields
 
-    #Lists to sort fields for styling
     fieldNames = []
     decimalFields = []
     aliasNames = []
 
     calculatedProperties = {
-        "Testing": [("fundBalanceMinus3", "Fund Balance Minus 3")],
-        "Benefits": [("pers", "Public Employee Retirement System"), ("medicare", "Medicare"),("wc", "Workers Comp"), ("plar", "Paid Leave Accumulation Rate"), ("vacation", "Vacation"), ("sick", "Sick Leave"), ("holiday", "Holiday Leave"), ("total_hrly", "Total Hourly Cost"), ("percent_leave", "Percent Leave"), ("monthly_hours", "Monthly Hours"), ("board_share_hrly", "Board Share Hourly"), ("life_hourly", "Life Hourly"), ("salary", "Salary"), ("fringes", "Fringes"), ("total_comp", "Total Compensation")],
-        "Payroll": [("pay_rate", "Pay Rate")],
-        "Fund":[("calcRemaining", "Remaining"), ("budgeted", "Budgeted")],
-        "Line": [("budgetRemaining", "Budget Remaining"), ("budgetSpent", "Budget Spent"), ("totalIncome", "Total Income")],
-        "GrantLine": [("budgetRemaining", "Budget Remaining"), ("budgetSpent", "Budget Spent"), ("totalIncome", "Total Income")]
-    }
-
-    #Fields that should be accumulated
-    summedFields = {
-        "Fund": "fund_cash_balance", 
-        "Line": "line_total_income",
-        "Transaction": "amount",
+        "GrantLine": [
+            ("budgetRemaining", "Budget Remaining"),
+            ("budgetSpent", "Budget Spent"),
+            ("totalIncome", "Total Income"),
+        ]
     }
 
     for field in fields:
         if isinstance(field, DecimalField):
-                decimalFields.append(field.name)
-        aliasNames.append(field.verbose_name)  
+            decimalFields.append(field.name)
+        aliasNames.append(field.verbose_name)
         fieldNames.append(field.name)
 
     if "GrantLine" in calculatedProperties:
-        for property in calculatedProperties["GrantLine"]:
-            #print(property)
-            aliasNames.append(property[1])
-            fieldNames.append(property[0])
-            decimalFields.append(property[0])
+        for prop_name, prop_label in calculatedProperties["GrantLine"]:
+            aliasNames.append(prop_label)
+            fieldNames.append(prop_name)
+            decimalFields.append(prop_name)
 
-    if request.method == 'POST':
+    if request.method == "POST":
         form = modelform_factory(GrantLine, exclude=["grant", "fund_year"])(request.POST)
         form.instance.grant = grant
         form.instance.fund_year = grant.fund.fund_id.split("-")[0]
+
         if form.is_valid():
-            line = form.save()
+            form.save()
             message = "Grant Line Created Successfully"
             form = modelform_factory(GrantLine, exclude=["grant", "fund_year"])()
         else:
             errors = form.errors
             if errors.get("line_budgeted"):
-                message = errors["line_budgeted"][0]     
+                message = errors["line_budgeted"][0]
             if errors.get("lineType"):
-                message = errors["lineType"][0]           
+                message = errors["lineType"][0]
     else:
         form = modelform_factory(GrantLine, exclude=["grant", "fund_year"])()
-    
+
     grantLines = GrantLine.objects.filter(grant=grant)
 
+    total_budget_remaining = Decimal("0.00")
+    total_budget_spent = Decimal("0.00")
+    total_income = Decimal("0.00")
+
+    for gl in grantLines:
+        total_budget_remaining += gl.budgetRemaining
+        total_budget_spent += gl.budgetSpent
+        total_income += gl.totalIncome
+
     context = {
-        "fields": fieldNames, 
-        "aliasNames": aliasNames, 
-        "data": grantLines, 
+        "fields": fieldNames,
+        "aliasNames": aliasNames,
+        "data": grantLines,
         "decimalFields": decimalFields,
         "form": form,
         "grant": grant,
         "message": message,
-        "grantAwardAmountRemaining":grant.grantAwardAmountRemaining
+        "grantAwardAmountRemaining": grant.grantAwardAmountRemaining,
+
+        # totals under the table
+        "total_budget_remaining": total_budget_remaining,
+        "total_budget_spent": total_budget_spent,
+        "total_income": total_income,
     }
 
     return render(request, "WCHDApp/partials/grantLineTableUpdate.html", context)
