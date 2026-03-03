@@ -91,7 +91,9 @@
     </div>
 </div>
 <!-- Button to generate PDF of revenue -->
-<button id="generate-pdf">Generate Revenue PDF</button>
+<form method="GET" action="{% url 'generate_receipt_pdf' %}">
+    <button type="submit">Generate Receipt PDF</button>
+</form>
 
 <!-- Init Select2 -->
 <script>
