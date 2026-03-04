@@ -1685,9 +1685,9 @@ def grantBreakdown(request):
         lineDict = {
             "lineName": line.line_name,
             "budgeted": line.line_budgeted,
-            "remaining": line.line_budget_remaining,
-            "spent": line.line_budget_spent,
-            "income":line.line_total_income
+            "remaining": line.budgetRemaining,
+            "spent": line.budgetSpent,
+            "income": line.totalIncome
         }
         linesList.append(lineDict)
 
