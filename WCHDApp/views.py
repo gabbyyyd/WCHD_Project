@@ -31,6 +31,9 @@ import re
 from decimal import Decimal
 from django.db.models import Sum, Value
 from django.db.models.functions import Coalesce
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 
 def generate_pdf(request, tableName):
     buffer = BytesIO()
@@ -1985,3 +1988,21 @@ def updateRevenues(request):
         revenue.save()
     print("Updated")
     return render(request, "WCHDApp/testing.html")
+
+def projection_chart(request):
+    # random data for testing
+    x = np.arange(10)
+    y = np.random.randint(10, 100, size=10)
+
+    plt.figure()
+    plt.plot(x, y, marker='o')
+    plt.title("Test Projection Chart")
+    plt.xlabel("Month")
+    plt.ylabel("Revenue")
+
+    buffer = BytesIO()
+    plt.savefig(buffer, format="png")
+    plt.close()
+
+    buffer.seek(0)
+    return HttpResponse(buffer.getvalue(), content_type="image/png")
