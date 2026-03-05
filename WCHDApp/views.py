@@ -547,27 +547,11 @@ def exports(request):
             exportData = pd.DataFrame.from_records(data)
 
 
-            #Use verbose_name for headers 
-            fields = [f for f in model._meta.get_fields() if not f.many_to_many and not f.one_to_many]
-            headers = [f.verbose_name.title() if hasattr(f, 'verbose_name') else f.name for f in fields]
-
-            # Build data rows
-            data_rows = []
-            for obj in queryset:
-                row = [getattr(obj, f.name) for f in fields]
-                data_rows.append(row)
-
-            # Convert to DataFrame
-            exportData = pd.DataFrame(data_rows, columns=headers)
-
-
             #From what I read the 2 commented lines are how we can show it in a new tab before download
             #However, its raw text apparently browsers dont like not immediately downloading csv, could be useful for our reports though
             response = HttpResponse(content_type='text/csv')
             #response = HttpResponse(content_type='text/text')
             #response['Content-Disposition'] = f'inline; filename="{fileName}.csv"'
-            response['Content-Disposition'] = f'attachment; filename="{fileName}.csv"'
-            exportData.to_csv(path_or_buf=response, index=False)
             response['Content-Disposition'] = f'attachment; filename="{fileName}.csv"'
 
             exportData.to_csv(path_or_buf=response, index=False)
@@ -1701,9 +1685,9 @@ def grantBreakdown(request):
         lineDict = {
             "lineName": line.line_name,
             "budgeted": line.line_budgeted,
-            "remaining": line.budgetRemaining,
-            "spent": line.budgetSpent,
-            "income": line.totalIncome
+            "remaining": line.line_budget_remaining,
+            "spent": line.line_budget_spent,
+            "income":line.line_total_income
         }
         linesList.append(lineDict)
 
