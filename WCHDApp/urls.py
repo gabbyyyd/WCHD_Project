@@ -43,6 +43,7 @@ urlpatterns = [
     path('viewByYear/', views.viewByYear, name='viewByYear'),
     path('viewByYearPartial/', views.viewByYearPartial, name='viewByYearPartial'),
     path('updateRevenues/', views.updateRevenues, name='updateRevenues'),
+    path("projection-chart/", views.projection_chart, name="projection_chart"),
 ]
 
     
