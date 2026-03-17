@@ -35,25 +35,27 @@
     </select>
     <button type="submit">Filter</button>
     </form>
-    <table border="1">
-        <tr>
-            {% for field in aliasNames%}
-                <th>{{field}}</th>
-            {% endfor%}
-        </tr>
-        {% for row in data%}
+    <div class="table-container">
+        <table border="1">
             <tr>
-            {% for field in fields%}
-                {% if field in decimalFields %}
-                    <td style="text-align: right;">{{row|get_attr:field}}</td>
-                {% else %}
-                    <td>{{row|get_attr:field}}</td>
-                {% endif %}
-            {% endfor%}
+                {% for field in aliasNames%}
+                    <th>{{field}}</th>
+                {% endfor%}
             </tr>
-        {% endfor %}
-    </table>
-    
+            {% for row in data%}
+                <tr>
+                {% for field in fields%}
+                    {% if field in decimalFields %}
+                        <td style="text-align: right;">{{row|get_attr:field}}</td>
+                    {% else %}
+                        <td>{{row|get_attr:field}}</td>
+                    {% endif %}
+                {% endfor%}
+                </tr>
+            {% endfor %}
+        </table>
+    </div>
+
     <h3>Total Revenue: {{ accumulator | money }}</h3>
     
     <div class="FormContainer">

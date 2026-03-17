@@ -1,3 +1,6 @@
+from multiprocessing import context
+from urllib import request
+
 from django.shortcuts import render, get_object_or_404, redirect
 from django.http import HttpResponse, JsonResponse
 from .models import Fund, Testing, Item, Grant, GrantLine, Revenue, Expense, Line, People
@@ -765,7 +768,10 @@ def transactionsView(request):
     else:
         # Return full page for normal GET
         return render(request, "WCHDApp/transactionsView.html", context)"""
-    return render(request, "WCHDApp/partials/revenueTableAndForm.html", context)
+    if request.headers.get("HX-Request"):
+        return render(request, "WCHDApp/partials/revenueTableAndForm.html", context)
+
+    return render(request, "WCHDApp/transactionsView.html", context)
 
 #Used to create a people form within another form for entry time creation
 def addPeopleForm(request):
