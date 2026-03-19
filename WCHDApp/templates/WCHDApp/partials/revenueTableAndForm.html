@@ -1,5 +1,7 @@
 {% load static %}
 {% load custom_filters %}
+<link rel="stylesheet" href="{% static 'WCHDApp/css/cleanPages.css' %}">
+<link rel="stylesheet" href="{% static 'WCHDApp/css/themes.css' %}">
 
 <div id="tableAndForm">
 
@@ -93,13 +95,38 @@
     </div>
 </div>
 <!-- Button to generate PDF of revenue -->
-<form method="GET" action="{% url 'generate_pdf' 'item' %}">
-    <button type="submit">Generate Receipt PDF</button>
-</form>
-
+<div id="pdf-button-container">
+    <form method="GET" action="{% url 'generate_pdf' 'revenue' %}">
+        <button type="submit" id="pdf-button">Generate Receipt PDF</button>
+    </form>
+</div>
 <!-- Init Select2 -->
 <script>
     $(document).ready(function() {
         $('.searchable-select').select2();
     });
 </script>
+
+<style>
+#pdf-button-container {
+    position: fixed;
+    right: 20px;
+    top: 60%;
+    transform: translateY(-60%);
+    z-index: 9999;
+}
+
+#pdf-button {
+    font-size: 18px;
+    padding: 15px 25px;
+    border-radius: 10px;
+    background-color: #007bff;
+    color: white;
+    border: none;
+    cursor: pointer;
+}
+
+#pdf-button:hover {
+    background-color: #0056b3;
+}
+</style>
