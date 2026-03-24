@@ -38,15 +38,18 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
+
+
+
 def generate_pdf(request, tableName):
     buffer = BytesIO()
 
-    # Create a PDF
+    # Create PDF document
     doc = SimpleDocTemplate(buffer, pagesize=letter)
     elements = []
     styles = getSampleStyleSheet()
 
-
+    # Title Styles
     title_style = ParagraphStyle(
         "TitleStyle",
         parent=styles["Title"],
@@ -65,59 +68,71 @@ def generate_pdf(request, tableName):
     )
 
 
-    #logo = Image("logo.png", width=80, height=80)
-    #logo.hAlign = 'LEFT'
-    #elements.append(logo)
 
     elements.append(Spacer(1, 12))
-
-    # Report Title
     elements.append(Paragraph("Washington County Health Department", title_style))
     elements.append(Paragraph(
         "List of Active Grants. Active means they have been awarded and the final expenditure report has not yet been approved.",
         subtitle_style
     ))
-
     elements.append(Spacer(1, 12))
 
-    #Same logic as tableView, needs updated to current 
+
     model = apps.get_model('WCHDApp', tableName)
-    values = model.objects.all().values()
+
+    # If Revenue, use select_related to get FK objects
+    if tableName.lower() == "revenue":
+        values = model.objects.select_related("grantLine").all()
+    else:
+        values = model.objects.all()
+
     fields = model._meta.get_fields()
     fieldNames = []
-    decimalFields = []
     aliasNames = []
-    for field in fields:
-        if field.is_relation:
-            if field.auto_created:
-                continue
-            else:
-                parentModel = apps.get_model('WCHDApp', field.name)
-                fkName = parentModel._meta.pk.name
-                fkAlias = parentModel._meta.pk.verbose_name
-                aliasNames.append(fkAlias)
-                fieldNames.append(fkName)
 
+    for field in fields:
+        # Skip auto-created reverse relations
+        if field.is_relation and field.auto_created:
+            continue
+
+        # ForeignKey: store as _id for access
+        if field.is_relation:
+            aliasNames.append(field.verbose_name)
+            fieldNames.append(field.name + "_id")  # Django stores FK as fieldname_id
         else:
-            if isinstance(field, DecimalField):
-                decimalFields.append(field.name)
-            aliasNames.append(field.verbose_name)  
+            aliasNames.append(field.verbose_name)
             fieldNames.append(field.name)
 
-    data = [
-        aliasNames,
-    ]
-    
+
+    data = [aliasNames]  # header row
+
     for row in values:
-        print(row)
         line = []
+
         for field in fieldNames:
-            line.append(row[field])
+            # Handle ForeignKey for Revenue (show name instead of ID)
+            if field.endswith("_id") and hasattr(row, field.replace("_id", "")):
+                related_obj = getattr(row, field.replace("_id", ""), None)
+                if related_obj:
+                    line.append(str(related_obj))
+                else:
+                    line.append("")
+            else:
+                # Safe access for normal fields
+                if isinstance(row, dict):
+                    # values() returns dict
+                    line.append(row.get(field, ""))
+                else:
+                    # normal queryset object
+                    line.append(getattr(row, field, ""))
+
         data.append(line)
 
 
-    # Table Styling
-    table = Table(data, colWidths=[80, 70, 70, 70, 70, 50, 100, 50, 90, 40])
+    col_count = max(len(r) for r in data)
+    col_widths = [40] * col_count  
+
+    table = Table(data, colWidths=col_widths)
     table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), colors.darkgray),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
@@ -126,27 +141,30 @@ def generate_pdf(request, tableName):
         ("BOTTOMPADDING", (0, 0), (-1, 0), 5),
         ("BACKGROUND", (0, 1), (-1, -1), colors.whitesmoke),
         ("GRID", (0, 0), (-1, -1), 1, colors.black),
-        ("FONTSIZE", (0, 0), (-1, -1), 10),
+        ("FONTSIZE", (0, 0), (-1, -1), 8),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("TOPPADDING", (0, 0), (-1, 0), 10),
+        ("LEFTPADDING", (0, 0), (-1, -1), 4),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+        
     ]))
 
     elements.append(table)
 
-    # Totals (below table)
+
     elements.append(Spacer(1, 12))
     elements.append(Paragraph("<b>Total Active Grants:</b> $571,880.00", styles["Normal"]))
     elements.append(Paragraph("<b>Total Amount for Project:</b> $19,144.00", styles["Normal"]))
 
-    #Build PDF
+    # Build PDF
     doc.build(elements)
 
-    # Get the PDF value from buffer
+    # Return PDF response
     buffer.seek(0)
     pdf_data = buffer.getvalue()
     buffer.close()
-
     response = HttpResponse(pdf_data, content_type='application/pdf')
-    response['Content-Disposition'] = f'inline; filename="testing.pdf"'
+    response['Content-Disposition'] = f'inline; filename="{tableName}_report.pdf"'
 
     return response
 
