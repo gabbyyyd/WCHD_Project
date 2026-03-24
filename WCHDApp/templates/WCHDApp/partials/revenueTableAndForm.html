@@ -99,20 +99,12 @@
     <form method="GET" action="{% url 'generate_pdf' 'revenue' %}">
         <button type="submit" id="pdf-button">Generate Receipt PDF</button>
     </form>
-</div>
-<!-- Init Select2 -->
-<script>
-    $(document).ready(function() {
-        $('.searchable-select').select2();
-    });
-</script>
-
-<style>
+    <style>
 #pdf-button-container {
     position: fixed;
     right: 20px;
     top: 60%;
-    transform: translateY(-60%);
+    transform: translateY(-50%);
     z-index: 9999;
 }
 
@@ -130,3 +122,11 @@
     background-color: #0056b3;
 }
 </style>
+</div>
+<!-- Init Select2 -->
+<script>
+    $(document).ready(function() {
+        $('.searchable-select').select2();
+    });
+</script>
+
