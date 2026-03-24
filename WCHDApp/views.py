@@ -2020,7 +2020,7 @@ def projection_chart(request):
 
     plt.figure()
     plt.plot(x, y, marker='o')
-    plt.title("Test Projection Chart")
+    plt.title("WCHD Revenue Projection")
     plt.xlabel("Month")
     plt.ylabel("Revenue")
 
@@ -2030,3 +2030,6 @@ def projection_chart(request):
 
     buffer.seek(0)
     return HttpResponse(buffer.getvalue(), content_type="image/png")
+
+def projectionPage(request):
+    return render(request, "WCHDApp/projections.html")
