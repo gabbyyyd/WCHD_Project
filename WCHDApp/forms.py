@@ -29,7 +29,7 @@ class TableSelect(forms.Form):
         # Sort models alphabetically by model name
         sorted_models = sorted(models, key=lambda m: m.__name__)
 
-        choices = [(model.__name__, model.__name__) for model in sorted_models]
+        choices = [(model.__name__, model._meta.verbose_name) for model in sorted_models]
 
         self.fields['table'] = forms.ChoiceField(
             choices=choices,

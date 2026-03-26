@@ -424,6 +424,7 @@ class ActivityList(models.Model):
     class Meta:
         ordering = ["ActivityList_id"]
         db_table = "Activity List"
+        verbose_name = "Activity List"
 
 
 class PayPeriod(models.Model):
