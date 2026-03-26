@@ -1,3 +1,5 @@
+{% load custom_filters %}
+
 <h3>Grant Line Breakdown</h3>
 <table>
     <tr>
@@ -10,14 +12,14 @@
     {% for line in linesList %}
         <tr>
             <td>{{line.lineName}}</td>
-            <td>{{line.budgeted}}</td>
-            <td>{{line.remaining}}</td>
-            <td>{{line.spent}}</td>
-            <td>{{line.income}}</td>
+            <td style="text-align: right;">{{ line.budgeted | money }}</td>
+            <td style="text-align: right;">{{ line.remaining | money }}</td>
+            <td style="text-align: right;">{{ line.spent | money }}</td>
+            <td style="text-align: right;">{{ line.income | money }}</td>
         </tr>
     {% endfor %}
 </table>
-<h4>Unbudgeted: {{unbudgeted}}</h4>
+<h4>Unbudgeted: {{unbudgeted | money }}</h4>
 <button onclick="document.getElementById('breakdown').innerHTML = ''">
     Close
 </button>
