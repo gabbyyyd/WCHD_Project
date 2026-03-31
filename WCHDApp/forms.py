@@ -89,12 +89,12 @@ class ExportSelect(forms.Form):
 class reconcileForm(forms.Form):
     firstFile = forms.FileField(
         label="Upload First CSV File",
-        required=False,
+        required=True,
         widget=forms.ClearableFileInput(attrs={'accept': '.csv'})
     )
     secondFile = forms.FileField(
         label="Upload Second CSV File",
-        required=False,
+        required=True,
         widget=forms.ClearableFileInput(attrs={'accept': '.csv'})
     )
    
