@@ -19,6 +19,7 @@ from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, Table, TableStyle
 from io import BytesIO
+import re
 import pandas as pd
 from openpyxl import load_workbook
 from openpyxl.styles import PatternFill
@@ -394,6 +395,11 @@ def tableView(request, tableName):
             aliasNames.append(property[1])
             fieldNames.append(property[0])
             decimalFields.append(property[0])
+
+    def fixedTableName(tableName):
+        return re.sub(r'(?<!^)(?=[A-Z])', ' ', tableName)
+
+    tableName = fixedTableName(tableName)
 
     context = {
         "fields" : fieldNames,
@@ -1847,9 +1853,9 @@ def testingGrantAccess(request):
 def viewByYear(request):
     currentDate = datetime.now()
     year = currentDate.year
-    years = list(range(2000, year+3))
+    years = list(range(2000, year+2))
 
-    models = ["Fund", "Line", "Item"]
+    models = ["Fund", "Line", "Item", "Revenue", "GrantLine", "Testing", "Benefits", "Payroll"]
 
     context = {
         "years": years,

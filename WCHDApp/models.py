@@ -1003,6 +1003,7 @@ class AccessControl(models.Model):
 
     class Meta:
         permissions = [("has_full_access", "Has full access to all views")]
+        db_table = "Access Control"
         verbose_name = "Access Control"
 
 
