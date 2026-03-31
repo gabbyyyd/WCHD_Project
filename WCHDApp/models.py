@@ -26,6 +26,7 @@ class InsuranceRate(models.Model):
     class Meta:
         ordering = ["name"]
         db_table = "Insurance Rate"
+        verbose_name = "Insurance Rate"
 
 
 # REMINDER TO TAKE OUT null=True and blank=True from all instances of dept once we have a department populated
@@ -39,6 +40,7 @@ class Dept(models.Model):
     class Meta:
         ordering = ["dept_name"]
         db_table = "Departments"
+        verbose_name = "Dept"
 
 
 class Fund(models.Model):
@@ -117,6 +119,7 @@ class Fund(models.Model):
     class Meta:
         ordering = ["fund_id", "fund_name"]
         db_table = "Funds"
+        verbose_name = "Fund"
 
 
 class Line(models.Model):
@@ -223,6 +226,7 @@ class Line(models.Model):
     class Meta:
         ordering = ["line_name"]
         db_table = "Lines"
+        verbose_name = "Line"
 
 
 class Item(models.Model):
@@ -258,6 +262,7 @@ class Item(models.Model):
     class Meta:
         ordering = ["item_name"]
         db_table = "Items"
+        verbose_name = "Item"
 
 
 class Employee(models.Model):
@@ -321,6 +326,7 @@ class Employee(models.Model):
     class Meta:
         ordering = ["surname", "first_name"]
         db_table = "Employees"
+        verbose_name = "Employees"
 
 
 class People(models.Model):
@@ -346,6 +352,7 @@ class People(models.Model):
     class Meta:
         ordering = ["name"]
         db_table = "Peoples"
+        verbose_name = "People"
 
 
 """
@@ -448,6 +455,7 @@ class PayPeriod(models.Model):
     class Meta:
         ordering = ["periodStart"]
         db_table = "PayPeriod"
+        verbose_name = "Pay Period"
 
 
 class Payroll(models.Model):
@@ -487,6 +495,7 @@ class Payroll(models.Model):
     class Meta:
         ordering = ["beg_date"]
         db_table = "Payroll"
+        verbose_name = "Payroll"
 
 
 class Grant(models.Model):
@@ -536,6 +545,7 @@ class Grant(models.Model):
     class Meta:
         ordering = ["grant_name"]
         db_table = "Grants"
+        verbose_name = "Grant"
 
 
 class GrantLine(models.Model):
@@ -617,6 +627,7 @@ class GrantLine(models.Model):
     class Meta:
         ordering = ["grant"]
         db_table = "Grant Lines"
+        verbose_name = "Grant Line"
 
 
 # Have a table made but dont use it right now
@@ -647,6 +658,7 @@ class BudgetActions(models.Model):
     class Meta:
         ordering = ["ba_id"]
         db_table = "Budget Actions"
+        verbose_name = "Budget Actions"
 
 
 class Carryover(models.Model):
@@ -675,6 +687,7 @@ class Carryover(models.Model):
     class Meta:
         ordering = ["dept"]
         db_table = "Carryover"
+        verbose_name = "Carryover"
 
 
 class HealthInsurance(models.TextChoices):
@@ -842,6 +855,7 @@ class Benefits(models.Model):
     class Meta:
         ordering = ["employee"]
         db_table = "Benefits"
+        verbose_name = "Benefits"
 
 
 class transactionType(models.TextChoices):
@@ -906,6 +920,7 @@ class Revenue(models.Model):
     class Meta:
         ordering = ["date"]
         db_table = "Revenue"
+        verbose_name = "Revenue"
 
 
 class Expense(models.Model):
@@ -980,6 +995,7 @@ class Expense(models.Model):
     class Meta:
         ordering = ["date"]
         db_table = "Expense"
+        verbose_name = "Expense"
 
 
 class AccessControl(models.Model):
@@ -987,6 +1003,7 @@ class AccessControl(models.Model):
 
     class Meta:
         permissions = [("has_full_access", "Has full access to all views")]
+        verbose_name = "Access Control"
 
 
 """
