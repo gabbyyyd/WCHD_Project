@@ -8,7 +8,6 @@
     <link rel="stylesheet" type="text/css" href="{% static 'WCHDApp/css/masterStyling.css' %}"> 
     <script src="https://unpkg.com/htmx.org@1.9.5"></script>
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-
     <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
 </head>
 <body>
@@ -24,13 +23,12 @@
             <li><a href="{% url 'grantStats' %}">Grant Stats</a></li>
             <li><a href="{% url 'viewByYear' %}">New Year Creation</a></li>
             <li><a href="{% url 'projectionPage' %}">Projections</a></li>
-            <!--No longer using these and will redirect in our normal view-->
-            <!--<li><a href="{% url 'calculateActivitySelect' %}">Clockify View</a></li>-->
+            <li><a href="{% url 'insuranceHome' %}">Insurance</a></li>
+
         </ul>
     </nav>
     <main>
         {% block content %}
-
         {% endblock %}
     </main>
 </body>
