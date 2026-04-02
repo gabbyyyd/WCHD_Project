@@ -1,5 +1,5 @@
 from django.db import models, transaction
-from djmoney.models.fields import MoneyField
+#from djmoney.models.fields import MoneyField
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from datetime import datetime
@@ -17,17 +17,36 @@ class FundSource(models.TextChoices):
 
 # used to be called Variable
 class InsuranceRate(models.Model):
-    name = models.CharField(max_length=50)
-    value = models.DecimalField(max_digits=10, decimal_places=2)
+    person = models.ForeignKey("People", on_delete=models.CASCADE)
+    month = models.PositiveSmallIntegerField()
+    year = models.PositiveSmallIntegerField()
+    health = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    dental = models.DecimalField(max_digits=10, decimal_places=2, default=0)
 
     def __str__(self):
-        return self.name
+        return f"{self.person} - {self.month}/{self.year}"
 
     class Meta:
-        ordering = ["name"]
+        ordering = ["year", "month", "person"]
         db_table = "Insurance Rate"
         verbose_name = "Insurance Rate"
+        verbose_name_plural = "Insurance Rates"
 
+class InsurancePercentage(models.Model):
+    person = models.ForeignKey("People", on_delete=models.CASCADE)
+    fund = models.ForeignKey("Fund", on_delete=models.CASCADE)
+    month = models.PositiveSmallIntegerField()
+    year = models.PositiveSmallIntegerField()
+    percent_of_time = models.DecimalField(max_digits=6, decimal_places=2)
+
+    def __str__(self):
+        return f"{self.person} - {self.fund} - {self.month}/{self.year}"
+
+    class Meta:
+        ordering = ["year", "month", "person", "fund"]
+        db_table = "Insurance Percentage"
+        verbose_name = "Insurance Percentage"
+        verbose_name_plural = "Insurance Percentages"
 
 # REMINDER TO TAKE OUT null=True and blank=True from all instances of dept once we have a department populated
 class Dept(models.Model):
