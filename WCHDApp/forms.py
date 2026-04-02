@@ -44,7 +44,7 @@ class InputSelect(forms.Form):
     models = apps.get_app_config('WCHDApp').get_models()
     modelsDict= {}
     for model in models:
-        modelsDict[model.__name__] = model.__name__
+        modelsDict[model.__name__] = model._meta.verbose_name.title()
     
     table = forms.ChoiceField(choices=modelsDict, label="Select Table", required=True)
     file = forms.FileField(
@@ -65,7 +65,7 @@ class ExportSelect(forms.Form):
     models = apps.get_app_config('WCHDApp').get_models()
     modelsDict= {}
     for model in models:
-        modelsDict[model.__name__] = model.__name__
+        modelsDict[model.__name__] = model._meta.verbose_name.title()
     
     table = forms.ChoiceField(choices=modelsDict, label="Select Table", required=True)
     fileName = forms.CharField(max_length=20, label="File Name (do not include .csv)", required=True)
@@ -89,12 +89,12 @@ class ExportSelect(forms.Form):
 class reconcileForm(forms.Form):
     firstFile = forms.FileField(
         label="Upload First CSV File",
-        required=False,
+        required=True,
         widget=forms.ClearableFileInput(attrs={'accept': '.csv'})
     )
     secondFile = forms.FileField(
         label="Upload Second CSV File",
-        required=False,
+        required=True,
         widget=forms.ClearableFileInput(attrs={'accept': '.csv'})
     )
    
