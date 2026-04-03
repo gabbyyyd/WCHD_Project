@@ -351,12 +351,12 @@ class Employee(models.Model):
 class People(models.Model):
     people_id = models.AutoField(primary_key=True, verbose_name="Customer/Vendor")
     name = models.CharField(max_length=255, verbose_name="Name")
-    address = models.CharField(max_length=255, verbose_name="Address")
-    city = models.CharField(max_length=100, verbose_name="City")
-    state = models.CharField(max_length=2, verbose_name="State")
-    zip_code = models.CharField(max_length=10, verbose_name="Zip Code")
-    phone = models.CharField(max_length=12, verbose_name="Phone Number")
-    email = models.EmailField(verbose_name="Email")
+    address = models.CharField(max_length=255, blank=True, null=True, verbose_name="Address")
+    city = models.CharField(max_length=100, blank=True, null=True, verbose_name="City")
+    state = models.CharField(max_length=2, blank=True, null=True, verbose_name="State")
+    zip_code = models.CharField(max_length=10, blank=True, null=True, verbose_name="Zip Code")
+    phone = models.CharField(max_length=12, blank=True, null=True, verbose_name="Phone Number")
+    email = models.EmailField( blank=True, null=True,verbose_name="Email")
     primary_contact = models.CharField(
         max_length=255, blank=True, null=True, verbose_name="Primary Contact"
     )
