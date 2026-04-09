@@ -62,11 +62,12 @@ def generate_pdf(request, tableName):
     subtitle_style = ParagraphStyle(
         "SubtitleStyle",
         parent=styles["Normal"],
-        fontSize=11,
+        fontSize=8,
         textColor=colors.black,
         spaceAfter=6,
         fontName="Helvetica-Oblique"
     )
+    
 
 
 
@@ -105,8 +106,8 @@ def generate_pdf(request, tableName):
             fieldNames.append(field.name)
 
 
-    data = [aliasNames]  # header row
-
+    data = [[Paragraph(str(name), styles["Normal"]) for name in aliasNames]]
+    
     for row in values:
         line = []
 
@@ -125,7 +126,7 @@ def generate_pdf(request, tableName):
                     line.append(row.get(field, ""))
                 else:
                     # normal queryset object
-                    line.append(getattr(row, field, ""))
+                    line.append(Paragraph(str(getattr(row, field, "")), styles["Normal"]))
 
         data.append(line)
 
