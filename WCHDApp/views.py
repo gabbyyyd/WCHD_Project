@@ -367,7 +367,7 @@ def tableView(request, tableName):
         "Testing": [("fundBalanceMinus3", "Fund Balance Minus 3")],
         "Benefits": [("pers", "Public Employee Retirement System"), ("medicare", "Medicare"),("wc", "Workers Comp"), ("plar", "Paid Leave Accumulation Rate"), ("vacation", "Vacation"), ("sick", "Sick Leave"), ("holiday", "Holiday Leave"), ("total_hrly", "Total Hourly Cost"), ("percent_leave", "Percent Leave"), ("monthly_hours", "Monthly Hours"), ("board_share_hrly", "Board Share Hourly"), ("life_hourly", "Life Hourly"), ("salary", "Salary"), ("fringes", "Fringes"), ("total_comp", "Total Compensation")],
         "Payroll": [("pay_rate", "Pay Rate")],
-        "Fund":[("calcRemaining", "Remaining"), ("budgeted", "Budgeted")],
+        "Fund":[("calcRemaining", "Remaining"), ("budgeted", "Budgeted"), ("actualRevenue", "Actual Revenue"), ("actualExpense", "Actual Expense"),("budgetedRevenue", "Budgeted Revenue"),("budgetedExpense", "Budgeted Expense"),],
         "GrantLine": [("budgetRemaining", "Budget Remaining"), ("budgetSpent", "Budget Spent"), ("totalIncome", "Total Income")],
         "Grant": [("grantAwardAmountRemaining", "Grant Award Amount Remaining"),( "recieved","Recieved")]
     }
@@ -2102,17 +2102,17 @@ def projection_chart(request):
     buffer.seek(0)
     return HttpResponse(buffer.getvalue(), content_type="image/png")
 
-def insuranceRateView(request):
-    return render(request, "WCHDApp/insuranceRateView.html")
+def insuranceAssignmentView(request):
+    return render(request, "WCHDApp/insuranceAssignmentView.html")
 
-def insuranceRateTableUpdate(request):
+def insuranceAssignmentTableUpdate(request):
     message = ""
 
-    insuranceRateModel = apps.get_model('WCHDApp', "InsuranceRate")
-    insuranceRateValues = insuranceRateModel.objects.all().order_by("year", "month", "person")
+    insuranceAssignmentModel = apps.get_model('WCHDApp', "InsuranceAssignment")
+    insuranceAssignmentValues = insuranceAssignmentModel.objects.all().order_by("year", "person")
 
-    fields = [field for field in insuranceRateModel._meta.fields if field.name != "id"]
-    
+    fields = [field for field in insuranceAssignmentModel._meta.fields if field.name != "id"]
+
     fieldNames = []
     decimalFields = []
     aliasNames = []
@@ -2123,36 +2123,36 @@ def insuranceRateTableUpdate(request):
         aliasNames.append(field.verbose_name)
         fieldNames.append(field.name)
 
-    insuranceRateForm = modelform_factory(
-        insuranceRateModel,
+    insuranceAssignmentForm = modelform_factory(
+        insuranceAssignmentModel,
         exclude=[],
         widgets={
-            'person': forms.Select(attrs={'class': 'searchable-select'}),
+            "person": forms.Select(attrs={"class": "searchable-select"}),
         }
     )
 
-    if request.method == 'POST':
-        form = insuranceRateForm(request.POST)
+    if request.method == "POST":
+        form = insuranceAssignmentForm(request.POST)
         if form.is_valid():
             form.save()
-            message = "Insurance rate posted successfully"
-            form = insuranceRateForm()
-            insuranceRateValues = insuranceRateModel.objects.all().order_by("year", "month", "person")
+            message = "Insurance assignment posted successfully"
+            form = insuranceAssignmentForm()
+            insuranceAssignmentValues = insuranceAssignmentModel.objects.all().order_by("year", "person")
         else:
             message = "Please correct the errors below."
     else:
-        form = insuranceRateForm()
+        form = insuranceAssignmentForm()
 
     context = {
         "fields": fieldNames,
         "aliasNames": aliasNames,
-        "data": insuranceRateValues,
+        "data": insuranceAssignmentValues,
         "decimalFields": decimalFields,
         "form": form,
         "message": message,
     }
 
-    return render(request, "WCHDApp/partials/insuranceRateTablePartial.html", context)
+    return render(request, "WCHDApp/partials/insuranceAssignmentTablePartial.html", context)
 
 def insuranceHome(request):
     return render(request, "WCHDApp/insuranceHome.html")
