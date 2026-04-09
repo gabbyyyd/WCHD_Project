@@ -2109,6 +2109,8 @@ def projection_chart(request):
     buffer.seek(0)
     return HttpResponse(buffer.getvalue(), content_type="image/png")
 
+# hello
+
 def insuranceAssignmentView(request):
     return render(request, "WCHDApp/insuranceAssignmentView.html")
 
