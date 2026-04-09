@@ -2171,7 +2171,7 @@ def insurancePercentageTableUpdate(request):
     message = ""
 
     insurancePercentageModel = apps.get_model('WCHDApp', "InsurancePercentage")
-    insurancePercentageValues = insurancePercentageModel.objects.all().order_by("year", "month", "person", "fund")
+    insurancePercentageValues = insurancePercentageModel.objects.all().order_by("start_date", "end_date", "person", "fund")
 
     fields = [field for field in insurancePercentageModel._meta.fields if field.name != "id"]
 
@@ -2200,7 +2200,7 @@ def insurancePercentageTableUpdate(request):
             form.save()
             message = "Insurance percentage posted successfully"
             form = insurancePercentageForm()
-            insurancePercentageValues = insurancePercentageModel.objects.all().order_by("year", "month", "person", "fund")
+            insurancePercentageValues = insurancePercentageModel.objects.all().order_by("start_date", "end_date", "person", "fund")
         else:
             message = "Please correct the errors below."
     else:

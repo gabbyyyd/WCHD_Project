@@ -4,11 +4,12 @@ from .models import Fund, Line, Dept, Item, Employee, People, ActivityList, Payr
 
 class PeopleAdmin(admin.ModelAdmin):
     search_fields = ['name']
-creating = self._state.adding
-self.line = line
+#creating = self._state.adding
+#self.line = line
 
 class ExpenseAdmin(admin.ModelAdmin):
     autocomplete_fields = ['people']
+    """
     if creating:
             self.line = self.item.line
             print(f"Full ID: {self.expenseFullID}")
@@ -18,6 +19,7 @@ class ExpenseAdmin(admin.ModelAdmin):
                 date = datetime.now().date()
                 fullID = f"{self.employee.employee_id}-{self.ActivityList.ActivityList_id}-{date.isoformat()}-{timeNow}"
                 self.expenseFullID = fullID
+    """
 
 class GrantAdmin(admin.ModelAdmin):
     list_display = ("grant_id", "grant_name")

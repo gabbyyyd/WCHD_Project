@@ -6,7 +6,7 @@
     <table border="1">
         <tr>
             {% for field in aliasNames %}
-            <th>{{ field }}</th>
+            <th>{{ field|title }}</th>
             {% endfor %}
         </tr>
         {% for row in data %}
