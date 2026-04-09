@@ -119,6 +119,25 @@ class Fund(models.Model):
 
         return total - expense_sum + revenue_sum
     
+    @property
+    def actualRevenue(self):
+        total = Decimal("0.00")
+        for line in self.lines.filter(lineType="Revenue"):
+            total += line.totalIncome
+        return total
+    
+    @property
+    def actualExpense(self):
+        total = Decimal("0.00")
+        for line in self.lines.filter(lineType="Expense"):
+            total += line.budgetSpent
+        return total
+    @property
+    def budgetedRevenue(self):
+        return self.lines.filter(lineType="Revenue").aggregate(s=Coalesce(Sum("line_budgeted"), Value(Decimal("0.00"))))["s"]
+    @property
+    def budgetedExpense(self):
+        return self.lines.filter(lineType="Expense").aggregate(s=Coalesce(Sum("line_budgeted"), Value(Decimal("0.00"))))["s"]
     def save(self, *args, **kwargs):
         # Check if this is the first time calling save on this object
         creating = self._state.adding
@@ -174,13 +193,16 @@ class Line(models.Model):
         for expense in expenses:
             total += expense.amount
 
-        return f"{total:.2f}"
+        #return f"{total:.2f}"
+        return total
 
     @property
     def budgetRemaining(self):
-        remaining = float(self.line_budgeted) - float(self.budgetSpent)
+        return self.line_budgeted - self.budgetSpent
+        #remaining = float(self.line_budgeted) - float(self.budgetSpent)
 
-        return f"{remaining:.2f}"
+        #return f"{remaining:.2f}"
+
 
     @property
     def totalIncome(self):
@@ -189,7 +211,8 @@ class Line(models.Model):
         for revenue in revenues:
             total += revenue.amount
 
-        return f"{total:.2f}"
+        #return f"{total:.2f}"
+        return total
 
     def clean(self):
         total = self.fund.fund_cash_balance
