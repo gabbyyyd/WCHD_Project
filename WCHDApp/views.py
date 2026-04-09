@@ -81,12 +81,19 @@ def generate_pdf(request, tableName):
 
 
     model = apps.get_model('WCHDApp', tableName)
+    selected_ids = request.GET.getlist('selected_rows')
 
     # If Revenue, use select_related to get FK objects
     if tableName.lower() == "revenue":
-        values = model.objects.select_related("grantLine").all()
+        queryset = model.objects.select_related("grantLine")
     else:
-        values = model.objects.all()
+        queryset = model.objects.all()
+
+    # 🔥 Apply filter if rows were selected
+    if selected_ids:
+        queryset = queryset.filter(id__in=selected_ids)
+
+    values = queryset
 
     fields = model._meta.get_fields()
     fieldNames = []

@@ -1,25 +1,53 @@
 {% load static %}
 {% load custom_filters %}
 <div id="tableAndForm">
+    
+    <a href="{% url 'generate_pdf' 'Expense' %}?item={{ item.item_id }}" target="_blank">
+        <button type="button">Generate Receipt PDF</button>
+    </a>
 
     <table border="1">
-        <tr>
-            {% for field in aliasNames%}
-            <th>{{field}}</th>
-            {% endfor%}
-        </tr>
-        {% for row in data%}
-        <tr>
-            {% for field in fields%}
-            {% if field in decimalFields %}
-            <td style="text-align: right;">{{row|get_attr:field}}</td>
-            {% else %}
-            <td>{{row|get_attr:field}}</td>
-            {% endif %}
-            {% endfor%}
-        </tr>
-        {% endfor %}
-    </table>
+
+    <!-- NEW PDF FORM STARTS HERE -->
+    <form method="POST" action="{% url 'generate_receipt_pdf' %}">
+        {% csrf_token %}
+
+        <table border="1">
+            <tr>
+                <!-- SELECT ALL -->
+                <th>
+                    <input type="checkbox" onclick="toggle(this)">
+                </th>
+
+                {% for field in aliasNames %}
+                <th>{{ field }}</th>
+                {% endfor %}
+            </tr>
+
+            {% for row in data %}
+            <tr>
+                <!-- CHECKBOX PER ROW -->
+                <td>
+                    <input type="checkbox" name="selected_ids" value="{{ row.id }}">
+                </td>
+
+                {% for field in fields %}
+                {% if field in decimalFields %}
+                <td style="text-align: right;">{{ row|get_attr:field }}</td>
+                {% else %}
+                <td>{{ row|get_attr:field }}</td>
+                {% endif %}
+                {% endfor %}
+            </tr>
+            {% endfor %}
+        </table>
+
+        <!-- PDF BUTTON -->
+        <button type="submit">Generate Selected Receipts</button>
+
+    </form>
+    <!-- NEW PDF FORM ENDS HERE -->
+
     <h3>Remaining Available Budget: {{budgeted_remaining|money}}</h3>
     <h3>Total Spent: {{ accumulator | money }}</h3>
 
@@ -57,4 +85,13 @@
     $(document).ready(function () {
         $('.searchable-select').select2();
     });
+</script>
+
+<script>
+function toggle(source) {
+    let checkboxes = document.getElementsByName('selected_ids');
+    for (let i = 0; i < checkboxes.length; i++) {
+        checkboxes[i].checked = source.checked;
+    }
+}
 </script>

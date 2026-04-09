@@ -37,29 +37,51 @@
     </select>
     <button type="submit">Filter</button>
     </form>
-    <div class="table-container">
-        <table border="1">
-            <tr>
-                {% for field in aliasNames%}
-                    <th>{{field}}</th>
-                {% endfor%}
-            </tr>
-            {% for row in data%}
-                <tr>
-                {% for field in fields%}
-                    {% if field in decimalFields %}
-                        <td style="text-align: right;">{{row|get_attr:field}}</td>
-                    {% else %}
-                        <td>{{row|get_attr:field}}</td>
-                    {% endif %}
-                {% endfor%}
-                </tr>
-            {% endfor %}
-        </table>
-    </div>
+    <form method="GET" action="{% url 'generate_pdf' 'revenue' %}">
 
-    <h3>Total Revenue: {{ accumulator | money }}</h3>
-    
+        <div class="table-container">
+            <table border="1">
+                <tr>
+                    <th>Select</th>
+                    {% for field in aliasNames %}
+                        <th>{{ field }}</th>
+                    {% endfor %}
+                </tr>
+
+                {% for row in data %}
+                    <tr>
+                        <td>
+                            <input type="checkbox" name="selected_rows" value="{{ row.id }}">
+                        </td>
+                        
+                        {% for field in fields %}
+                            {% if field in decimalFields %}
+                                <td style="text-align: right;">{{ row|get_attr:field }}</td>
+                            {% else %}
+                                <td>{{ row|get_attr:field }}</td>
+                            {% endif %}
+                        {% endfor %}
+                    </tr>
+                {% endfor %}
+            </table>
+        </div>
+
+        <input type="hidden" name="item" value="{{ itemObj.item_id }}">
+
+        <div style="display: flex; align-items: center; margin-top: 10px; margin-bottom: 20px;">
+            
+            <h3 style="margin: 0;">
+                Total Revenue: {{ accumulator | money }}
+            </h3>
+
+            <button type="submit" class="pdf-button" style="margin-left: auto;">
+                Download Selected PDF
+            </button>
+
+        </div>
+
+    </form>
+
     <div class="FormContainer">
         <form
             method="POST"
@@ -94,32 +116,34 @@
         {{message}}
     </div>
 </div>
-<!-- Button to generate PDF of revenue -->
-<div id="pdf-button-container">
-    <form method="GET" action="{% url 'generate_pdf' 'revenue' %}">
-        <button type="submit" id="pdf-button">Generate Receipt PDF</button>
-    </form>
-    <style>
-#pdf-button-container {
-    position: fixed;
-    right: 20px;
-    top: 60%;
-    transform: translateY(-50%);
-    z-index: 9999;
+
+<style>
+.pdf-button-wrapper {
+    margin-top: 20px;
+    display: flex;
+    justify-content: flex-end; /* push to right */
 }
 
-#pdf-button {
-    font-size: 18px;
-    padding: 15px 25px;
-    border-radius: 10px;
-    background-color: #007bff;
+.pdf-button {
+    font-size: 15px;
+    padding: 12px 20px;
+    border-radius: 8px;
+    background: linear-gradient(135deg, #007bff, #00c6ff);
     color: white;
     border: none;
     cursor: pointer;
+    font-weight: 600;
+    box-shadow: 0 3px 8px rgba(0,0,0,0.15);
+    transition: all 0.2s ease;
 }
 
-#pdf-button:hover {
-    background-color: #0056b3;
+.pdf-button:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 5px 12px rgba(0,0,0,0.2);
+}
+
+.pdf-button:active {
+    transform: scale(0.97);
 }
 </style>
 </div>
