@@ -2111,6 +2111,9 @@ def projection_chart(request):
 
 # hello
 
+def projectionPage(request):
+    return render(request, "WCHDApp/projections.html")
+
 def insuranceAssignmentView(request):
     return render(request, "WCHDApp/insuranceAssignmentView.html")
 
@@ -2218,6 +2221,3 @@ def insurancePercentageTableUpdate(request):
     }
 
     return render(request, "WCHDApp/partials/insurancePercentageTablePartial.html", context)
-
-def projectionPage(request):
-    return render(request, "WCHDApp/projections.html")
