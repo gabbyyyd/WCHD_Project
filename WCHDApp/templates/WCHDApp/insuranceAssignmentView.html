@@ -2,7 +2,7 @@
 {% load static %}
 {% load custom_filters %}
 
-{% block title %}Insurance Rates{% endblock %}
+{% block title %}Insurance Assignments{% endblock %}
 
 {% block content %}
     <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet" />
@@ -11,10 +11,10 @@
     <link rel="stylesheet" type="text/css" href="{% static 'WCHDApp/css/transactionView.css' %}">
     <link rel="stylesheet" type="text/css" href="{% static 'WCHDApp/css/tableStyling.css' %}">
 
-    <h1>Insurance Rates</h1>
+    <h1>Insurance Assignments</h1>
 
     <div id="output"
-         hx-get="{% url 'insuranceRateTableUpdate' %}"
+         hx-get="{% url 'insuranceAssignmentTableUpdate' %}"
          hx-trigger="load">
     </div>
 {% endblock %}
