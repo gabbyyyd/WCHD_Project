@@ -119,21 +119,16 @@ def generate_pdf(request, tableName):
         line = []
 
         for field in fieldNames:
-            # Handle ForeignKey for Revenue (show name instead of ID)
             if field.endswith("_id") and hasattr(row, field.replace("_id", "")):
                 related_obj = getattr(row, field.replace("_id", ""), None)
-                if related_obj:
-                    line.append(str(related_obj))
-                else:
-                    line.append("")
+                text = str(related_obj) if related_obj else ""
             else:
-                # Safe access for normal fields
                 if isinstance(row, dict):
-                    # values() returns dict
-                    line.append(row.get(field, ""))
+                    text = str(row.get(field, ""))
                 else:
-                    # normal queryset object
-                    line.append(Paragraph(str(getattr(row, field, "")), styles["Normal"]))
+                    text = str(getattr(row, field, ""))
+
+            line.append(Paragraph(text, styles["Normal"]))
 
         data.append(line)
 
