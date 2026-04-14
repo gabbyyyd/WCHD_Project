@@ -7,10 +7,25 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('WCHDApp', '0147_alter_accesscontrol_options_and_more'),
+        ('WCHDApp', '0149_alter_insurancerate_options_and_more'),
     ]
 
     operations = [
+        migrations.AlterField(
+            model_name='insurancerate',
+            name='month',
+            field=models.PositiveSmallIntegerField(),
+        ),
+        migrations.AlterField(
+            model_name='insurancerate',
+            name='person',
+            field=models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to='WCHDApp.people'),
+        ),
+        migrations.AlterField(
+            model_name='insurancerate',
+            name='year',
+            field=models.PositiveSmallIntegerField(),
+        ),
         migrations.CreateModel(
             name='InsurancePercentage',
             fields=[
