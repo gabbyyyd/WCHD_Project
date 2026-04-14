@@ -55,10 +55,6 @@ class Migration(migrations.Migration):
             options={'ordering': ['grant'], 'verbose_name': 'Grant Line'},
         ),
         migrations.AlterModelOptions(
-            name='insurancerate',
-            options={'ordering': ['name'], 'verbose_name': 'Insurance Rate'},
-        ),
-        migrations.AlterModelOptions(
             name='item',
             options={'ordering': ['item_name'], 'verbose_name': 'Item'},
         ),
@@ -81,16 +77,6 @@ class Migration(migrations.Migration):
         migrations.AlterModelOptions(
             name='revenue',
             options={'ordering': ['date'], 'verbose_name': 'Revenue'},
-        ),
-        migrations.AlterField(
-            model_name='insurancerate',
-            name='name',
-            field=models.CharField(blank=True, max_length=50, null=True),
-        ),
-        migrations.AlterField(
-            model_name='insurancerate',
-            name='value',
-            field=models.DecimalField(blank=True, decimal_places=2, max_digits=10, null=True),
         ),
         migrations.AlterModelTable(
             name='accesscontrol',

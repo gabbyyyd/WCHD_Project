@@ -15,24 +15,6 @@ class Migration(migrations.Migration):
             name='insurancepercentage',
             options={'ordering': ['start_date', 'end_date', 'person', 'fund'], 'verbose_name': 'Insurance Percentage', 'verbose_name_plural': 'Insurance Percentages'},
         ),
-        migrations.RemoveField(
-            model_name='insurancepercentage',
-            name='month',
-        ),
-        migrations.RemoveField(
-            model_name='insurancepercentage',
-            name='year',
-        ),
-        migrations.AddField(
-            model_name='insurancepercentage',
-            name='end_date',
-            field=models.DateField(blank=True, null=True),
-        ),
-        migrations.AddField(
-            model_name='insurancepercentage',
-            name='start_date',
-            field=models.DateField(blank=True, null=True),
-        ),
         migrations.CreateModel(
             name='InsuranceAssignment',
             fields=[
@@ -44,17 +26,11 @@ class Migration(migrations.Migration):
                 ('dental_rate', models.DecimalField(decimal_places=2, default=0, max_digits=10)),
                 ('life_type', models.CharField(blank=True, max_length=50)),
                 ('life_rate', models.DecimalField(decimal_places=2, default=0, max_digits=10)),
-                ('person', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, to='WCHDApp.people')),
             ],
             options={
                 'verbose_name': 'Insurance Assignment',
                 'verbose_name_plural': 'Insurance Assignments',
-                'db_table': 'Insurance Rate',
-                'ordering': ['year', 'person'],
-                'unique_together': {('person', 'year')},
+                'db_table': 'Insurance Assignment',
             },
-        ),
-        migrations.DeleteModel(
-            name='InsuranceRate',
         ),
     ]

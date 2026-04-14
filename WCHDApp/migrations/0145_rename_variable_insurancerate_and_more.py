@@ -10,10 +10,6 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
-        migrations.RenameModel(
-            old_name='Variable',
-            new_name='InsuranceRate',
-        ),
         migrations.AlterModelOptions(
             name='activitylist',
             options={'ordering': ['ActivityList_id']},
@@ -59,10 +55,6 @@ class Migration(migrations.Migration):
             options={'ordering': ['grant']},
         ),
         migrations.AlterModelOptions(
-            name='insurancerate',
-            options={'ordering': ['name']},
-        ),
-        migrations.AlterModelOptions(
             name='item',
             options={'ordering': ['item_name']},
         ),
@@ -99,9 +91,5 @@ class Migration(migrations.Migration):
             model_name='revenue',
             name='reference',
             field=models.CharField(max_length=50, verbose_name='Reference'),
-        ),
-        migrations.AlterModelTable(
-            name='insurancerate',
-            table='Insurance Rate',
         ),
     ]
