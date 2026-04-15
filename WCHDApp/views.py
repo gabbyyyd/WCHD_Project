@@ -387,6 +387,8 @@ def tableView(request, tableName):
     aliasNames = []
     decimalFields = []
     for field in fields:
+        if tableName == "Fund" and field.name == "sof":
+            continue
         if isinstance(field, DecimalField):
                 decimalFields.append(field.name)
         aliasNames.append(field.verbose_name)  
