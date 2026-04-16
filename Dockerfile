@@ -29,10 +29,22 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . /WCHDApp/
 
 # Expose the Django port
-EXPOSE 8000
+# EXPOSE 8000
+
+# Use for Render
+EXPOSE 10000
 
 # Run Django’s development server
 #First CMD line is for development builds, second is for produciton builds
-CMD ["python", "manage.py", "runserver", "0.0.0.0:8000"]
+# CMD ["python", "manage.py", "runserver", "0.0.0.0:8000"]
+
+# This line is for production, try this:  $PORT is known by Render
+CMD gunicorn WCHDProject.wsgi:application \
+  --bind 0.0.0.0:$PORT
+
+# Old way....
 #CMD ["gunicorn", "WCHDProject.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "4"]
+
+#Try below to work with Render
+
 
