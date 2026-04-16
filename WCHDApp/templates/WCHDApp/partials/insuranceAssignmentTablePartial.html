@@ -6,7 +6,7 @@
     <table border="1">
         <tr>
             {% for field in aliasNames %}
-            <th>{{ field }}</th>
+            <th>{{ field|title }}</th>
             {% endfor %}
         </tr>
         {% for row in data %}
@@ -24,7 +24,7 @@
 
     <div class="FormContainer">
         <form method="POST"
-              hx-post="{% url 'insuranceRateTableUpdate' %}"
+              hx-post="{% url 'insuranceAssignmentTableUpdate' %}"
               hx-target="#tableAndForm"
               hx-swap="outerHTML">
             {% csrf_token %}

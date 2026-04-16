@@ -37,7 +37,7 @@
             {% if field.name == "people" %}
             <div>
                 <a hx-get="{% url 'addPeopleForm' %}" hx-target="#peopleForm" hx-swap="innerHTML"
-                    hx-vals='{"itemID": "{{ item }}", "source":"expense"}'>
+                    hx-vals='{"itemID": "{{ item.item_id }}", "source":"expense"}'>
                     + Add Person/Company</a>
             </div>
             <div id="peopleForm"></div>

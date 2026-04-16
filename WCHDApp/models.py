@@ -16,37 +16,45 @@ class FundSource(models.TextChoices):
     LOCAL = "LOCAL"
 
 # used to be called Variable
-class InsuranceRate(models.Model):
+class InsuranceAssignment(models.Model):
     person = models.ForeignKey("People", on_delete=models.CASCADE)
-    month = models.PositiveSmallIntegerField()
     year = models.PositiveSmallIntegerField()
-    health = models.DecimalField(max_digits=10, decimal_places=2, default=0)
-    dental = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+
+    health_type = models.CharField(max_length=50, blank=True)
+    health_rate = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+
+    dental_type = models.CharField(max_length=50, blank=True)
+    dental_rate = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+
+    life_type = models.CharField(max_length=50, blank=True)
+    life_rate = models.DecimalField(max_digits=10, decimal_places=2, default=0)
 
     def __str__(self):
-        return f"{self.person} - {self.month}/{self.year}"
+        return f"{self.person} - {self.year}"
 
     class Meta:
-        ordering = ["year", "month", "person"]
+        ordering = ["year", "person"]
         db_table = "Insurance Rate"
-        verbose_name = "Insurance Rate"
-        verbose_name_plural = "Insurance Rates"
+        verbose_name = "Insurance Assignment"
+        verbose_name_plural = "Insurance Assignments"
+        unique_together = ("person", "year")
 
 class InsurancePercentage(models.Model):
     person = models.ForeignKey("People", on_delete=models.CASCADE)
     fund = models.ForeignKey("Fund", on_delete=models.CASCADE)
-    month = models.PositiveSmallIntegerField()
-    year = models.PositiveSmallIntegerField()
+    start_date = models.DateField(null=True, blank=True)
+    end_date = models.DateField(null=True, blank=True)
     percent_of_time = models.DecimalField(max_digits=6, decimal_places=2)
 
     def __str__(self):
-        return f"{self.person} - {self.fund} - {self.month}/{self.year}"
+        return f"{self.person} - {self.fund} - {self.start_date} to {self.end_date}"
 
     class Meta:
-        ordering = ["year", "month", "person", "fund"]
+        ordering = ["start_date", "end_date", "person", "fund"]
         db_table = "Insurance Percentage"
         verbose_name = "Insurance Percentage"
         verbose_name_plural = "Insurance Percentages"
+
 
 # REMINDER TO TAKE OUT null=True and blank=True from all instances of dept once we have a department populated
 class Dept(models.Model):
@@ -119,6 +127,25 @@ class Fund(models.Model):
 
         return total - expense_sum + revenue_sum
     
+    @property
+    def actualRevenue(self):
+        total = Decimal("0.00")
+        for line in self.lines.filter(lineType="Revenue"):
+            total += line.totalIncome
+        return total
+    
+    @property
+    def actualExpense(self):
+        total = Decimal("0.00")
+        for line in self.lines.filter(lineType="Expense"):
+            total += line.budgetSpent
+        return total
+    @property
+    def budgetedRevenue(self):
+        return self.lines.filter(lineType="Revenue").aggregate(s=Coalesce(Sum("line_budgeted"), Value(Decimal("0.00"))))["s"]
+    @property
+    def budgetedExpense(self):
+        return self.lines.filter(lineType="Expense").aggregate(s=Coalesce(Sum("line_budgeted"), Value(Decimal("0.00"))))["s"]
     def save(self, *args, **kwargs):
         # Check if this is the first time calling save on this object
         creating = self._state.adding
@@ -174,13 +201,16 @@ class Line(models.Model):
         for expense in expenses:
             total += expense.amount
 
-        return f"{total:.2f}"
+        #return f"{total:.2f}"
+        return total
 
     @property
     def budgetRemaining(self):
-        remaining = float(self.line_budgeted) - float(self.budgetSpent)
+        return self.line_budgeted - self.budgetSpent
+        #remaining = float(self.line_budgeted) - float(self.budgetSpent)
 
-        return f"{remaining:.2f}"
+        #return f"{remaining:.2f}"
+
 
     @property
     def totalIncome(self):
@@ -189,7 +219,8 @@ class Line(models.Model):
         for revenue in revenues:
             total += revenue.amount
 
-        return f"{total:.2f}"
+        #return f"{total:.2f}"
+        return total
 
     def clean(self):
         total = self.fund.fund_cash_balance

@@ -62,11 +62,12 @@ def generate_pdf(request, tableName):
     subtitle_style = ParagraphStyle(
         "SubtitleStyle",
         parent=styles["Normal"],
-        fontSize=11,
+        fontSize=8,
         textColor=colors.black,
         spaceAfter=6,
         fontName="Helvetica-Oblique"
     )
+    
 
 
 
@@ -80,12 +81,19 @@ def generate_pdf(request, tableName):
 
 
     model = apps.get_model('WCHDApp', tableName)
+    selected_ids = request.GET.getlist('selected_rows')
 
     # If Revenue, use select_related to get FK objects
     if tableName.lower() == "revenue":
-        values = model.objects.select_related("grantLine").all()
+        queryset = model.objects.select_related("grantLine")
     else:
-        values = model.objects.all()
+        queryset = model.objects.all()
+
+    # 🔥 Apply filter if rows were selected
+    if selected_ids:
+        queryset = queryset.filter(id__in=selected_ids)
+
+    values = queryset
 
     fields = model._meta.get_fields()
     fieldNames = []
@@ -105,27 +113,22 @@ def generate_pdf(request, tableName):
             fieldNames.append(field.name)
 
 
-    data = [aliasNames]  # header row
-
+    data = [[Paragraph(str(name), styles["Normal"]) for name in aliasNames]]
+    
     for row in values:
         line = []
 
         for field in fieldNames:
-            # Handle ForeignKey for Revenue (show name instead of ID)
             if field.endswith("_id") and hasattr(row, field.replace("_id", "")):
                 related_obj = getattr(row, field.replace("_id", ""), None)
-                if related_obj:
-                    line.append(str(related_obj))
-                else:
-                    line.append("")
+                text = str(related_obj) if related_obj else ""
             else:
-                # Safe access for normal fields
                 if isinstance(row, dict):
-                    # values() returns dict
-                    line.append(row.get(field, ""))
+                    text = str(row.get(field, ""))
                 else:
-                    # normal queryset object
-                    line.append(getattr(row, field, ""))
+                    text = str(getattr(row, field, ""))
+
+            line.append(Paragraph(text, styles["Normal"]))
 
         data.append(line)
 
@@ -366,7 +369,7 @@ def tableView(request, tableName):
         "Testing": [("fundBalanceMinus3", "Fund Balance Minus 3")],
         "Benefits": [("pers", "Public Employee Retirement System"), ("medicare", "Medicare"),("wc", "Workers Comp"), ("plar", "Paid Leave Accumulation Rate"), ("vacation", "Vacation"), ("sick", "Sick Leave"), ("holiday", "Holiday Leave"), ("total_hrly", "Total Hourly Cost"), ("percent_leave", "Percent Leave"), ("monthly_hours", "Monthly Hours"), ("board_share_hrly", "Board Share Hourly"), ("life_hourly", "Life Hourly"), ("salary", "Salary"), ("fringes", "Fringes"), ("total_comp", "Total Compensation")],
         "Payroll": [("pay_rate", "Pay Rate")],
-        "Fund":[("calcRemaining", "Remaining"), ("budgeted", "Budgeted")],
+        "Fund":[("calcRemaining", "Remaining"), ("budgeted", "Budgeted"), ("actualRevenue", "Actual Revenue"), ("actualExpense", "Actual Expense"),("budgetedRevenue", "Budgeted Revenue"),("budgetedExpense", "Budgeted Expense"),],
         "GrantLine": [("budgetRemaining", "Budget Remaining"), ("budgetSpent", "Budget Spent"), ("totalIncome", "Total Income")],
         "Grant": [("grantAwardAmountRemaining", "Grant Award Amount Remaining"),( "recieved","Recieved")]
     }
@@ -384,6 +387,8 @@ def tableView(request, tableName):
     aliasNames = []
     decimalFields = []
     for field in fields:
+        if tableName == "Fund" and field.name == "sof":
+            continue
         if isinstance(field, DecimalField):
                 decimalFields.append(field.name)
         aliasNames.append(field.verbose_name)  
@@ -2101,17 +2106,22 @@ def projection_chart(request):
     buffer.seek(0)
     return HttpResponse(buffer.getvalue(), content_type="image/png")
 
-def insuranceRateView(request):
-    return render(request, "WCHDApp/insuranceRateView.html")
+# hello
 
-def insuranceRateTableUpdate(request):
+def projectionPage(request):
+    return render(request, "WCHDApp/projections.html")
+
+def insuranceAssignmentView(request):
+    return render(request, "WCHDApp/insuranceAssignmentView.html")
+
+def insuranceAssignmentTableUpdate(request):
     message = ""
 
-    insuranceRateModel = apps.get_model('WCHDApp', "InsuranceRate")
-    insuranceRateValues = insuranceRateModel.objects.all().order_by("year", "month", "person")
+    insuranceAssignmentModel = apps.get_model('WCHDApp', "InsuranceAssignment")
+    insuranceAssignmentValues = insuranceAssignmentModel.objects.all().order_by("year", "person")
 
-    fields = [field for field in insuranceRateModel._meta.fields if field.name != "id"]
-    
+    fields = [field for field in insuranceAssignmentModel._meta.fields if field.name != "id"]
+
     fieldNames = []
     decimalFields = []
     aliasNames = []
@@ -2122,36 +2132,36 @@ def insuranceRateTableUpdate(request):
         aliasNames.append(field.verbose_name)
         fieldNames.append(field.name)
 
-    insuranceRateForm = modelform_factory(
-        insuranceRateModel,
+    insuranceAssignmentForm = modelform_factory(
+        insuranceAssignmentModel,
         exclude=[],
         widgets={
-            'person': forms.Select(attrs={'class': 'searchable-select'}),
+            "person": forms.Select(attrs={"class": "searchable-select"}),
         }
     )
 
-    if request.method == 'POST':
-        form = insuranceRateForm(request.POST)
+    if request.method == "POST":
+        form = insuranceAssignmentForm(request.POST)
         if form.is_valid():
             form.save()
-            message = "Insurance rate posted successfully"
-            form = insuranceRateForm()
-            insuranceRateValues = insuranceRateModel.objects.all().order_by("year", "month", "person")
+            message = "Insurance assignment posted successfully"
+            form = insuranceAssignmentForm()
+            insuranceAssignmentValues = insuranceAssignmentModel.objects.all().order_by("year", "person")
         else:
             message = "Please correct the errors below."
     else:
-        form = insuranceRateForm()
+        form = insuranceAssignmentForm()
 
     context = {
         "fields": fieldNames,
         "aliasNames": aliasNames,
-        "data": insuranceRateValues,
+        "data": insuranceAssignmentValues,
         "decimalFields": decimalFields,
         "form": form,
         "message": message,
     }
 
-    return render(request, "WCHDApp/partials/insuranceRateTablePartial.html", context)
+    return render(request, "WCHDApp/partials/insuranceAssignmentTablePartial.html", context)
 
 def insuranceHome(request):
     return render(request, "WCHDApp/insuranceHome.html")
@@ -2163,7 +2173,7 @@ def insurancePercentageTableUpdate(request):
     message = ""
 
     insurancePercentageModel = apps.get_model('WCHDApp', "InsurancePercentage")
-    insurancePercentageValues = insurancePercentageModel.objects.all().order_by("year", "month", "person", "fund")
+    insurancePercentageValues = insurancePercentageModel.objects.all().order_by("start_date", "end_date", "person", "fund")
 
     fields = [field for field in insurancePercentageModel._meta.fields if field.name != "id"]
 
@@ -2192,7 +2202,7 @@ def insurancePercentageTableUpdate(request):
             form.save()
             message = "Insurance percentage posted successfully"
             form = insurancePercentageForm()
-            insurancePercentageValues = insurancePercentageModel.objects.all().order_by("year", "month", "person", "fund")
+            insurancePercentageValues = insurancePercentageModel.objects.all().order_by("start_date", "end_date", "person", "fund")
         else:
             message = "Please correct the errors below."
     else:
@@ -2208,6 +2218,3 @@ def insurancePercentageTableUpdate(request):
     }
 
     return render(request, "WCHDApp/partials/insurancePercentageTablePartial.html", context)
-
-def projectionPage(request):
-    return render(request, "WCHDApp/projections.html")
