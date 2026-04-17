@@ -86,7 +86,8 @@ WSGI_APPLICATION = 'WCHDProject.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/5.1/ref/settings/#databases
 
-#Used this for Production
+#Used this for Production, maybe
+"""
 DATABASES = {
     'default': {
         'ENGINE': os.getenv('DATABASE_ENGINE'),
@@ -97,7 +98,7 @@ DATABASES = {
         'PORT': os.getenv('DATABASE_PORT'),  # Default PostgreSQL port
     }
 }
-
+"""
 #Used this for Development
 """
 DATABASES = {
@@ -107,7 +108,14 @@ DATABASES = {
     )
 }
 """
-
+#Render for Production
+DATABASES = {
+    "default":
+    dj_database_url.parse(
+        os.environ.get("DATABASE_URL",
+         "")
+    )
+}
 
 
 

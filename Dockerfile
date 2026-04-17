@@ -39,12 +39,11 @@ EXPOSE 10000
 # CMD ["python", "manage.py", "runserver", "0.0.0.0:8000"]
 
 # This line is for production, try this:  $PORT is known by Render
-CMD gunicorn WCHDProject.wsgi:application \
-  --bind 0.0.0.0:$PORT
+# CMD gunicorn WCHDProject.wsgi:application \
+#  --bind 0.0.0.0:$PORT
 
-# Old way....
-#CMD ["gunicorn", "WCHDProject.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "4"]
+# Old way.... Now using
+CMD ["gunicorn", "WCHDProject.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "4"]
 
-#Try below to work with Render
 
 
