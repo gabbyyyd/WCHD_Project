@@ -16,37 +16,45 @@ class FundSource(models.TextChoices):
     LOCAL = "LOCAL"
 
 # used to be called Variable
-class InsuranceRate(models.Model):
+class InsuranceAssignment(models.Model):
     person = models.ForeignKey("People", on_delete=models.CASCADE)
-    month = models.PositiveSmallIntegerField()
     year = models.PositiveSmallIntegerField()
-    health = models.DecimalField(max_digits=10, decimal_places=2, default=0)
-    dental = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+
+    health_type = models.CharField(max_length=50, blank=True)
+    health_rate = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+
+    dental_type = models.CharField(max_length=50, blank=True)
+    dental_rate = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+
+    life_type = models.CharField(max_length=50, blank=True)
+    life_rate = models.DecimalField(max_digits=10, decimal_places=2, default=0)
 
     def __str__(self):
-        return f"{self.person} - {self.month}/{self.year}"
+        return f"{self.person} - {self.year}"
 
     class Meta:
-        ordering = ["year", "month", "person"]
+        ordering = ["year", "person"]
         db_table = "Insurance Rate"
-        verbose_name = "Insurance Rate"
-        verbose_name_plural = "Insurance Rates"
+        verbose_name = "Insurance Assignment"
+        verbose_name_plural = "Insurance Assignments"
+        unique_together = ("person", "year")
 
 class InsurancePercentage(models.Model):
     person = models.ForeignKey("People", on_delete=models.CASCADE)
     fund = models.ForeignKey("Fund", on_delete=models.CASCADE)
-    month = models.PositiveSmallIntegerField()
-    year = models.PositiveSmallIntegerField()
+    start_date = models.DateField(null=True, blank=True)
+    end_date = models.DateField(null=True, blank=True)
     percent_of_time = models.DecimalField(max_digits=6, decimal_places=2)
 
     def __str__(self):
-        return f"{self.person} - {self.fund} - {self.month}/{self.year}"
+        return f"{self.person} - {self.fund} - {self.start_date} to {self.end_date}"
 
     class Meta:
-        ordering = ["year", "month", "person", "fund"]
+        ordering = ["start_date", "end_date", "person", "fund"]
         db_table = "Insurance Percentage"
         verbose_name = "Insurance Percentage"
         verbose_name_plural = "Insurance Percentages"
+
 
 # REMINDER TO TAKE OUT null=True and blank=True from all instances of dept once we have a department populated
 class Dept(models.Model):

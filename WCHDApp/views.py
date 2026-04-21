@@ -2104,7 +2104,6 @@ def projection_chart(request):
     buffer.seek(0)
     return HttpResponse(buffer.getvalue(), content_type="image/png")
 
-<<<<<<< HEAD
 # hello
 
 def projectionPage(request):
@@ -2112,19 +2111,15 @@ def projectionPage(request):
 
 def insuranceAssignmentView(request):
     return render(request, "WCHDApp/insuranceAssignmentView.html")
-=======
-def insuranceRateView(request):
-    return render(request, "WCHDApp/insuranceRateView.html")
->>>>>>> parent of 3666ec3 (insurance stuff)
 
-def insuranceRateTableUpdate(request):
+def insuranceAssignmentTableUpdate(request):
     message = ""
 
-    insuranceRateModel = apps.get_model('WCHDApp', "InsuranceRate")
-    insuranceRateValues = insuranceRateModel.objects.all().order_by("year", "month", "person")
+    insuranceAssignmentModel = apps.get_model('WCHDApp', "InsuranceAssignment")
+    insuranceAssignmentValues = insuranceAssignmentModel.objects.all().order_by("year", "person")
 
-    fields = [field for field in insuranceRateModel._meta.fields if field.name != "id"]
-    
+    fields = [field for field in insuranceAssignmentModel._meta.fields if field.name != "id"]
+
     fieldNames = []
     decimalFields = []
     aliasNames = []
@@ -2135,36 +2130,36 @@ def insuranceRateTableUpdate(request):
         aliasNames.append(field.verbose_name)
         fieldNames.append(field.name)
 
-    insuranceRateForm = modelform_factory(
-        insuranceRateModel,
+    insuranceAssignmentForm = modelform_factory(
+        insuranceAssignmentModel,
         exclude=[],
         widgets={
-            'person': forms.Select(attrs={'class': 'searchable-select'}),
+            "person": forms.Select(attrs={"class": "searchable-select"}),
         }
     )
 
-    if request.method == 'POST':
-        form = insuranceRateForm(request.POST)
+    if request.method == "POST":
+        form = insuranceAssignmentForm(request.POST)
         if form.is_valid():
             form.save()
-            message = "Insurance rate posted successfully"
-            form = insuranceRateForm()
-            insuranceRateValues = insuranceRateModel.objects.all().order_by("year", "month", "person")
+            message = "Insurance assignment posted successfully"
+            form = insuranceAssignmentForm()
+            insuranceAssignmentValues = insuranceAssignmentModel.objects.all().order_by("year", "person")
         else:
             message = "Please correct the errors below."
     else:
-        form = insuranceRateForm()
+        form = insuranceAssignmentForm()
 
     context = {
         "fields": fieldNames,
         "aliasNames": aliasNames,
-        "data": insuranceRateValues,
+        "data": insuranceAssignmentValues,
         "decimalFields": decimalFields,
         "form": form,
         "message": message,
     }
 
-    return render(request, "WCHDApp/partials/insuranceRateTablePartial.html", context)
+    return render(request, "WCHDApp/partials/insuranceAssignmentTablePartial.html", context)
 
 def insuranceHome(request):
     return render(request, "WCHDApp/insuranceHome.html")
