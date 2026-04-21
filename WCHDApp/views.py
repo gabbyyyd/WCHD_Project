@@ -2041,7 +2041,6 @@ def projection_chart(request):
     return HttpResponse(buffer.getvalue(), content_type="image/png")
 
 <<<<<<< HEAD
-<<<<<<< HEAD
 # hello
 
 def projectionPage(request):
@@ -2155,8 +2154,6 @@ def insurancePercentageTableUpdate(request):
 
     return render(request, "WCHDApp/partials/insurancePercentageTablePartial.html", context)
 =======
-=======
->>>>>>> parent of d5ee05c (insurance updates)
 def projectionPage(request):
     return render(request, "WCHDApp/projections.html")
 >>>>>>> parent of d5ee05c (insurance updates)
