@@ -46,8 +46,8 @@ urlpatterns = [
     path('projection/', views.projectionPage, name='projectionPage'),
     path("projection-chart/", views.projection_chart, name="projection_chart"),
     path('insurance/', views.insuranceHome, name='insuranceHome'),
-    path('insuranceAssignmentView/', views.insuranceAssignmentView, name='insuranceAssignmentView'),
-    path('insuranceAssignmentTableUpdate/', views.insuranceAssignmentTableUpdate, name='insuranceAssignmentTableUpdate'),
+    path('insuranceRateView/', views.insuranceRateView, name='insuranceRateView'),
+    path('insuranceRateTableUpdate/', views.insuranceRateTableUpdate, name='insuranceRateTableUpdate'),
     path('insurancePercentageView/', views.insurancePercentageView, name='insurancePercentageView'),
     path('insurancePercentageTableUpdate/', views.insurancePercentageTableUpdate, name='insurancePercentageTableUpdate'),
     ]
