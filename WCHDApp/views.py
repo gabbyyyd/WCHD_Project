@@ -38,6 +38,7 @@ from django.db.models.functions import Coalesce
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+from django.http import HttpResponseForbidden
 
 
 
@@ -172,7 +173,6 @@ def generate_pdf(request, tableName):
 
     return response
 
-@permission_required('WCHDApp.has_full_access', raise_exception=True)
 def reconcile(request):
     if request.method == "POST":
         form = reconcileForm(request.POST, request.FILES)
@@ -232,7 +232,6 @@ def reconcile(request):
     return render(request, "WCHDApp/reconcile.html", {"form":form})
 
 #This view is used to select what table we want to create a report from
-@permission_required('WCHDApp.has_full_access', raise_exception=True)
 def reports(request):
     if request.method == "POST":
         #TableSelect is a form defined in forms.py
@@ -314,7 +313,6 @@ def logIn(request):
     return render(request, "WCHDApp/logIn.html")
 
 #Logic to get what tables we want to see/create from. Same thing as reports
-@permission_required('WCHDApp.has_full_access', raise_exception=True)
 def viewTableSelect(request):
     if request.method == 'POST':
         form = TableSelect(request.POST)
@@ -351,7 +349,6 @@ def viewTableSelect(request):
     return render(request, "WCHDApp/viewTableSelect.html", {'form': form})
 
 #This function decides what data we use in our tables in tableView.html
-@permission_required('WCHDApp.has_full_access', raise_exception=True)
 def tableView(request, tableName):
 
     #Grabbing the model selected in viewTableSelect
@@ -439,7 +436,6 @@ def tableView(request, tableName):
 #New system to dynamically create forms based of model
 #Default way of creating objects dynamically based on table name
 #Some have overrides as stated above
-@permission_required('WCHDApp.has_full_access', raise_exception=True)
 def createEntry(request, tableName):
     message = ""
     #Grabbing selected model in viewTableSelect
@@ -468,7 +464,6 @@ def createEntry(request, tableName):
     return render(request, "WCHDApp/createEntry.html", {"form": form, "tableName": tableName, "message": message})
 
 #Default import logic, payroll has its own logic and is redirect to its own view
-@permission_required('WCHDApp.has_full_access', raise_exception=True)
 def imports(request):
     message = ""
     if request.method == 'POST':
@@ -556,7 +551,6 @@ def imports(request):
         
     return render(request, "WCHDApp/imports.html", {"form": form, "message": message})
 
-@permission_required('WCHDApp.has_full_access', raise_exception=True)
 def exports(request):
 
     message = ""
@@ -596,7 +590,6 @@ def exports(request):
         
     return render(request, "WCHDApp/exports.html", {"form": form, "message": message})
 
-@permission_required('WCHDApp.has_full_access', raise_exception=True)
 def countyPayrollExport(request):
     payperiodModel = apps.get_model('WCHDApp', "PayPeriod")
     payperiods = payperiodModel.objects.all()
@@ -681,7 +674,6 @@ def countyPayrollExport(request):
     return render(request, "WCHDApp/countyPayrollExport.html", context)
 
 #This is for revenue but was named previous to table split
-@permission_required('WCHDApp.has_full_access', raise_exception=True)
 def transactionsItem(request):
     #This view is just to pull what item we want and pass it to the partial
     #This is a common pattern you will see 
@@ -830,7 +822,6 @@ def addPeopleForm(request):
     return render(request, "WCHDApp/partials/formPartial.html", context)
 
 #these are named transaction expense because it was originally built on the transactions table whihc then got split into 2 different tables
-@permission_required('WCHDApp.has_full_access', raise_exception=True)
 def transactionsExpenses(request):
     itemModel = apps.get_model("WCHDApp", "Item")
     items = itemModel.objects.filter(line__lineType="Expense")
@@ -927,7 +918,6 @@ def transactionsExpenseTableUpdate(request):
 
     return render(request, "WCHDApp/partials/transactionsTablePartial.html", context)
 
-@permission_required('WCHDApp.has_full_access', raise_exception=True)
 def lineView(request):
     funds = Fund.objects.all()
     
@@ -1011,7 +1001,6 @@ def lineTableUpdate(request):
 
     return render(request, "WCHDApp/partials/lineTableUpdate.html", context)
 
-@permission_required('WCHDApp.has_full_access', raise_exception=True)
 def itemView(request):
     lines = Line.objects.all()
     context = {
@@ -1237,7 +1226,6 @@ def checkPrivileges(request):
 def noPrivileges(request, exception):
     return render(request, "WCHDApp/noPrivileges.html")
 
-@permission_required('WCHDApp.has_full_access', raise_exception=True)
 def clockifyImportPayroll(request, *args, **kwargs):
     message = ""
 
@@ -1594,7 +1582,6 @@ def getActivities(request):
     }
     return JsonResponse(data)
 
-@permission_required('WCHDApp.has_full_access', raise_exception=True)
 def payrollView(request, *args, **kwargs):
     payperiodModel = apps.get_model("WCHDApp", "PayPeriod")
     payperiods = payperiodModel.objects.all()
@@ -1733,7 +1720,6 @@ def employeeSummary(request):
 def transactionCustomView(request):
     return render(request, "WCHDApp/transactionCustomView.html")
 
-@permission_required('WCHDApp.has_full_access', raise_exception=True)
 def grantStats(request):
     grantModel = apps.get_model("WCHDApp", "Grant")
     grants = grantModel.objects.all()
@@ -1918,7 +1904,6 @@ def testingGrantAccess(request):
     #making change
     return render(request, "WCHDApp/grantExpenseTesting.html", context)
 
-@permission_required('WCHDApp.has_full_access', raise_exception=True)
 def viewByYear(request):
     currentDate = datetime.now()
     year = currentDate.year
