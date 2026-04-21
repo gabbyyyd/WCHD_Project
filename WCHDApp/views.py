@@ -14,9 +14,10 @@ from django.db import models, transaction
 from django.contrib.auth import authenticate, login
 from django.contrib.auth.decorators import permission_required
 from django.contrib import messages
-from reportlab.lib.pagesizes import letter
+from reportlab.lib.pagesizes import letter, landscape
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import inch
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, Table, TableStyle
 from io import BytesIO
 import re
@@ -46,7 +47,7 @@ def generate_pdf(request, tableName):
     buffer = BytesIO()
 
     # Create PDF document
-    doc = SimpleDocTemplate(buffer, pagesize=letter)
+    doc = SimpleDocTemplate(buffer, pagesize=landscape(letter))
     elements = []
     styles = getSampleStyleSheet()
 
@@ -67,8 +68,24 @@ def generate_pdf(request, tableName):
         spaceAfter=6,
         fontName="Helvetica-Oblique"
     )
-    
 
+    table_text_style = ParagraphStyle(
+        "TableText",
+        parent=styles["Normal"],
+        fontSize=7,          # smaller font
+        leading=8,           # tighter line spacing
+        wordWrap='CJK',      # forces wrapping even on long words
+        alignment=0          # LEFT align (important for readability)
+    )
+    
+    header_style = ParagraphStyle(
+        "HeaderStyle",
+        parent=styles["Normal"],
+        fontSize=6,
+        leading=8,
+        alignment=1,  # center
+        fontName="Helvetica-Bold"
+    )
 
 
     elements.append(Spacer(1, 12))
@@ -89,7 +106,7 @@ def generate_pdf(request, tableName):
     else:
         queryset = model.objects.all()
 
-    # 🔥 Apply filter if rows were selected
+    # Apply filter if rows were selected
     if selected_ids:
         queryset = queryset.filter(id__in=selected_ids)
 
@@ -111,9 +128,14 @@ def generate_pdf(request, tableName):
         else:
             aliasNames.append(field.verbose_name)
             fieldNames.append(field.name)
+        
+    id_index = aliasNames.index("id") if "id" in aliasNames else None
+    payment_index = aliasNames.index("payment type") if "payment type" in aliasNames else None
+    comment_index = aliasNames.index("comment") if "comment" in aliasNames else None
 
 
-    data = [[Paragraph(str(name), styles["Normal"]) for name in aliasNames]]
+
+    data = [[Paragraph(str(name), header_style) for name in aliasNames]]
     
     for row in values:
         line = []
@@ -128,15 +150,36 @@ def generate_pdf(request, tableName):
                 else:
                     text = str(getattr(row, field, ""))
 
-            line.append(Paragraph(text, styles["Normal"]))
+            line.append(Paragraph(text, table_text_style))
 
         data.append(line)
 
 
+
     col_count = max(len(r) for r in data)
-    col_widths = [40] * col_count  
+    usable_width = 10 * inch
+
+    # Start everything evenly
+    col_widths = [usable_width / col_count] * col_count
+
+    # Set specific columns
+    col_widths[0] = 0.35 * inch   # ID (small)
+    col_widths[5] = 0.4 * inch   # Payment Type (small)
+    col_widths[7] = 3.5 * inch   # Comment (large)
+
+    # Rebalance remaining columns
+    fixed_indexes = [0, 5, 7]
+    remaining_width = usable_width - sum(col_widths[i] for i in fixed_indexes)
+
+    remaining_cols = [i for i in range(col_count) if i not in fixed_indexes]
+
+    if remaining_cols:
+        even_width = remaining_width / len(remaining_cols)
+        for i in remaining_cols:
+            col_widths[i] = even_width
 
     table = Table(data, colWidths=col_widths)
+
     table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), colors.darkgray),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
