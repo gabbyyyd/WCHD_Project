@@ -1241,214 +1241,153 @@ def noPrivileges(request, exception):
 def clockifyImportPayroll(request, *args, **kwargs):
     message = ""
 
+    #Making an id to make payroll is like 2025-01
+    idTracker = 0
+    year = datetime.now().year
+    #Mapping fields from clockify to fields our models use
     fieldMap = {
         "Project": "ActivityList",
+        #"Department": "dept",
         "User": "employee",
         "Start Date": "beg_date",
         "End Date": "end_date",
+        #"Billable Rate (USD)": "billableRate",
         "Billable Amount (USD)": "pay_amount",
-        "Duration (decimal)": "hours",
+        "Duration (decimal)": "hours"
     }
 
     if request.method == 'POST':
         form = FileInput(request.POST, request.FILES)
-
         if form.is_valid():
             selectedFile = form.cleaned_data['file']
             dateInputted = request.POST.get("date")
-
-            try:
-                file = pd.read_csv(selectedFile)
-                file.dropna(how='all', inplace=True)
-            except Exception as e:
-                message = f"Could not read file: {e}"
-                return render(
-                    request,
-                    "WCHDApp/clockifyImportPayroll.html",
-                    {"form": form, "message": message}
-                )
-
+            print(f"DATE INPUTTED: {dateInputted}")
+            file = pd.read_csv(selectedFile)
+            file.dropna(how='all', inplace=True)
+            columns = file.columns
+            row = file.iloc[0]
             data = []
-
-            payrollModel = apps.get_model('WCHDApp', 'Payroll')
-            fields = payrollModel._meta.get_fields()
-
-            fks = []
+            
+            model = apps.get_model('WCHDApp', 'Payroll')
+            fields = model._meta.get_fields()
+            neededFields = []
+            #Exclude autocreated fields like id
             for field in fields:
-                if field.is_relation:
-                    fks.append(field.name)
+                if not field.auto_created:
+                    neededFields.append(field.name)
 
-            # Keep original CSV column names separate
-            source_columns = list(file.columns)
+            columns = list(columns)
+            
+            #Creating a list of indices that we want from columns
+            neededIndexes = []
+            for i in range(len(columns)):
+                if columns[i] in fieldMap:
+                    #updated columns[i] to the name we need for the model
+                    columns[i] = fieldMap[columns[i]]
+                    neededIndexes.append(i)
 
-            # Build list 
-            mapped_columns = []
-            for source_col in source_columns:
-                if source_col in fieldMap:
-                    mapped_columns.append((source_col, fieldMap[source_col]))
-
-            # Build dictionaries
-            for _, row in file.iterrows():
-                row_dict = {}
-
-                try:
-                    startTime = str(row["Start Time"])
-                    startTimeHour = startTime.split(" ")[0]
-                except Exception:
-                    startTimeHour = ""
-
-                for source_col, model_col in mapped_columns:
-                    value = row[source_col]
-
-                    if pd.isna(value):
-                        value = None
-
-                    if model_col in ["beg_date", "end_date"] and value is not None:
-                        try:
-                            newDate = datetime.strptime(str(value), "%m/%d/%Y").date()
-                        except ValueError:
-                            raise ValidationError(
-                                {"payperiod": f"Invalid date format in {source_col}: {value}"}
-                            )
-
-                        row_dict[model_col] = newDate
-
-                        # Find pay period
-                        # Aquired from input date
+            #Creating a list of dictionaries for each row with the values we need
+            for i in range(len(file)):
+                dict = {}
+                row = file.iloc[i]
+                startTime = row["Start Time"]
+                startTimeHour = startTime.split(" ")[0]
+                for j in neededIndexes:
+                    column = columns[j]
+                    if column == "beg_date" or column == "end_date":
                         payPeriodModel = apps.get_model('WCHDApp', 'PayPeriod')
                         periods = payPeriodModel.objects.all()
-
+                        date = row[j]
+                        newDate = datetime.strptime(date, "%m/%d/%Y").date()
+                        dict[column] = newDate
+                        payPeriodFound = False
                         for period in periods:
                             if period.periodStart <= newDate <= period.periodEnd:
-                                row_dict["payperiod"] = period
-                                break
+                                dict['payperiod'] = period   
+                                payPeriodFound = True   
                     else:
-                        row_dict[model_col] = value
+                        dict[column] = row[j]
+                dict["startTime"] = startTimeHour
+                #dict['payroll_id'] = str(year)+"-"+str(idTracker)
+                idTracker += 1
+                data.append(dict)
 
-                row_dict["startTime"] = startTimeHour
-                data.append(row_dict)
-
+            lookUpFields = []
+            fks = []
+            for field in fields:
+                #Logic for foreign keys
+                if field.is_relation:
+                    fks.append(field.name)
+                else:
+                    lookUpFields.append(field)
             try:
+                #transaction so that if something fails everything leading up to it is rolled back, no half imports
                 with transaction.atomic():
+                    
                     for line in data:
                         if 'payperiod' not in line:
-                            raise ValidationError({"payperiod": "No payperiod for this date range"})
-
-                        # Convert types
-                        for key in list(line.keys()):
-                            if isinstance(line[key], np.integer):
+                            raise ValidationError({"payperiod": "No payperiod for this date range"}) 
+                        for key in line:
+                            if type(line[key]) == np.int64:
                                 line[key] = int(line[key])
-                            elif isinstance(line[key], np.floating):
-                                line[key] = float(line[key])
-
-                        # Foreign keys
-                        for key in list(line.keys()):
-                            if key not in fks:
-                                continue
-
-                            parentModel = apps.get_model('WCHDApp', key)
-
-                            if key == "employee":
-                                full_name = str(line[key]).strip()
-
-                                # Remove after comma
-                                full_name = full_name.split(",")[0].strip()
-
-                                parts = full_name.split()
-                                if len(parts) == 0:
-                                    raise ValidationError({"employee": "Employee name is blank"})
-
-                                first_name = parts[0]
-                                surname = parts[-1] if len(parts) > 1 else None
-
-                                if surname:
-                                    matches = parentModel.objects.filter(
-                                        first_name__iexact=first_name,
-                                        surname__iexact=surname
-                                    )
-                                else:
-                                    matches = parentModel.objects.filter(
-                                        first_name__iexact=first_name
-                                    )
-
-                                if matches.count() == 0 and len(parts) > 1:
-                                    # Fallback: first name only
-                                    matches = parentModel.objects.filter(
-                                        first_name__iexact=first_name
-                                    )
-
-                                if matches.count() == 0:
-                                    raise ValidationError(
-                                        {"employee": f"No employee found for {full_name}"}
-                                    )
-                                elif matches.count() > 1:
-                                    raise ValidationError(
-                                        {"employee": f"Multiple employees matched {full_name}"}
-                                    )
-
-                                line[key] = matches.first()
-
-                            elif key == "ActivityList":
-                                project_value = str(line[key]).strip()
-
-                                try:
-                                    line[key] = parentModel.objects.get(program=project_value)
-                                except parentModel.DoesNotExist:
-                                    raise ValidationError(
-                                        {"ActivityList": f"No ActivityList found for project {project_value}"}
-                                    )
-                                except parentModel.MultipleObjectsReturned:
-                                    raise ValidationError(
-                                        {"ActivityList": f"Multiple ActivityList rows found for project {project_value}"}
-                                    )
-
-                            elif key == "dept":
-                                try:
-                                    line[key] = parentModel.objects.get(dept_name=line[key])
-                                except parentModel.DoesNotExist:
-                                    raise ValidationError({"dept": "Department does not exist"})
-                                except parentModel.MultipleObjectsReturned:
-                                    raise ValidationError({"dept": "Multiple departments matched"})
-
+                            if key in fks:
+                                #Linking objects with the fields we have
+                                parentModel = apps.get_model('WCHDApp', key)
+                                if key == "employee":
+                                    names = line[key].split(" ")
+                                    try:
+                                        line[key] = parentModel.objects.get(first_name=names[0], surname=names[1])
+                                    except:
+                                        raise ValidationError({"employee": "No employee with this name"})
+                                elif key == "ActivityList":
+                                    try:
+                                        line[key] = parentModel.objects.get(program=line[key])
+                                    except:
+                                        raise ValidationError({"ActivityList": "Activity does not exist"})
+                                elif key == "dept":
+                                    try:
+                                        line[key] = parentModel.objects.get(dept_name=line[key])
+                                    except:
+                                        raise ValidationError({"dept": "Department does not exist"})
+                        #print(line)
                         activity = line['ActivityList']
-                        paidEmployee = line['employee']
 
                         payType = activity.payType
                         if payType == "special":
-                            item = paidEmployee.specialPayItem
+                            employee = line['employee']
+                            item = employee.specialPayItem
                         elif payType == "admin":
-                            item = paidEmployee.payItem
+                            employee = line['employee']
+                            item = employee.payItem
                         else:
                             item = activity.item
+                        
 
-                        payRate = float(paidEmployee.pay_rate)
+                        payRate = float(line['employee'].pay_rate)
                         hours = line['hours']
-                        amount = payRate * hours
-
-                        # Match people
+                        amount = payRate*hours
+                        user  = request.user
                         try:
-                            people = People.objects.get(
-                                name=f"{paidEmployee.first_name} {paidEmployee.surname}".strip()
-                            )
-                        except People.DoesNotExist:
-                            raise ValidationError(
-                                {"people": f"No People object found for {paidEmployee.first_name} {paidEmployee.surname}"}
-                            )
-                        except People.MultipleObjectsReturned:
-                            raise ValidationError(
-                                {"people": f"Multiple People objects found for {paidEmployee.first_name} {paidEmployee.surname}"}
-                            )
+                            employeeModel = apps.get_model('WCHDApp', "employee")
+                            employee = employeeModel.objects.get(user=user)
+                            #employeeEmail = employee.email
+                        except:
+                            raise ValidationError({"employee":"No employee with signed in user"})
 
-                        expenseFullID = (
-                            f"{paidEmployee.employee_id}-"
-                            f"{activity.ActivityList_id}-"
-                            f"{line['beg_date']}-"
-                            f"{line['startTime']}"
-                        )
-
+                        try:
+                            paidEmployee = line['employee']
+                        except:
+                            raise ValidationError({"employee": "No employee with this name"})
+                        try:
+                            people = People.objects.get(name=line['employee'])
+                        except:
+                            raise ValidationError({"people":"No People object with this name"})
+                        
+                        #Need a full id in order to tell if we are trying to reenter lines
+                        expenseFullID = f"{paidEmployee.employee_id}-{activity.ActivityList_id}-{line["beg_date"]}-{line["startTime"]}"
                         duplicate = Expense.objects.filter(expenseFullID=expenseFullID).exists()
-
-                        if not duplicate:
+                        if duplicate == False:
+                            #Whether or not we entered a posting date
                             if dateInputted == "":
                                 expense = Expense(
                                     item=item,
@@ -1458,9 +1397,8 @@ def clockifyImportPayroll(request, *args, **kwargs):
                                     comment="Payroll",
                                     ActivityList=activity,
                                     line=item.line,
-                                    employee=paidEmployee,
-                                    expenseFullID=expenseFullID
-                                )
+                                    employee=employee,
+                                    expenseFullID=expenseFullID)
                             else:
                                 expense = Expense(
                                     item=item,
@@ -1471,23 +1409,26 @@ def clockifyImportPayroll(request, *args, **kwargs):
                                     comment="Payroll",
                                     ActivityList=activity,
                                     line=item.line,
-                                    employee=paidEmployee,
-                                    expenseFullID=expenseFullID
-                                )
-
-                            expense.full_clean()
-                            expense.save()
-                            message = "Posted"
-
-                        # Only used for duplicates
+                                    employee=employee,
+                                    expenseFullID=expenseFullID)
+                            try:
+                                expense.full_clean()
+                                expense.save()
+                                message = "Posted"
+                            except ValidationError as e:
+                                raise ValidationError(e)
+                                
+                        else:
+                            print("Expense already posted")
+                   
+                        #Deleting start time from dictionary because its not a value in our payroll object
                         line.pop("startTime", None)
-
-                        payrollModel.objects.update_or_create(
+                        obj, _ = model.objects.update_or_create(
                             **line,
-                            defaults=line
+                            defaults = line
                         )
-
             except ValidationError as e:
+                #Setting messages for the frontend to the error messages from both view or model
                 message = e.message_dict
                 if message.get("warrant"):
                     message = message['warrant'][0]
@@ -1496,27 +1437,22 @@ def clockifyImportPayroll(request, *args, **kwargs):
                 elif message.get("amount"):
                     message = message['amount'][0]
                 elif message.get("comment"):
-                    message = message['comment'][0]
+                    message = message['comment'][0] 
                 elif message.get("ActivityList"):
                     message = message['ActivityList'][0]
                 elif message.get("people"):
-                    message = message['people'][0]
+                    message = message['people'][0] 
                 elif message.get("employee"):
                     message = message['employee'][0]
                 elif message.get("payperiod"):
                     message = message['payperiod'][0]
                 elif message.get("dept"):
                     message = message['dept'][0]
-            except Exception as e:
-                message = f"Import failed: {e}"
     else:
         form = FileInput()
-
-    return render(
-        request,
-        "WCHDApp/clockifyImportPayroll.html",
-        {"form": form, "message": message}
-    )
+    
+        
+    return render(request, "WCHDApp/clockifyImportPayroll.html", {"form": form, "message": message})
 
 def calculateActivitySelect(request, *args, **kwargs):
     payrollModel = apps.get_model('WCHDApp', 'Payroll')
@@ -2106,115 +2042,5 @@ def projection_chart(request):
     buffer.seek(0)
     return HttpResponse(buffer.getvalue(), content_type="image/png")
 
-# hello
-
 def projectionPage(request):
     return render(request, "WCHDApp/projections.html")
-
-def insuranceAssignmentView(request):
-    return render(request, "WCHDApp/insuranceAssignmentView.html")
-
-def insuranceAssignmentTableUpdate(request):
-    message = ""
-
-    insuranceAssignmentModel = apps.get_model('WCHDApp', "InsuranceAssignment")
-    insuranceAssignmentValues = insuranceAssignmentModel.objects.all().order_by("year", "person")
-
-    fields = [field for field in insuranceAssignmentModel._meta.fields if field.name != "id"]
-
-    fieldNames = []
-    decimalFields = []
-    aliasNames = []
-
-    for field in fields:
-        if isinstance(field, DecimalField):
-            decimalFields.append(field.name)
-        aliasNames.append(field.verbose_name)
-        fieldNames.append(field.name)
-
-    insuranceAssignmentForm = modelform_factory(
-        insuranceAssignmentModel,
-        exclude=[],
-        widgets={
-            "person": forms.Select(attrs={"class": "searchable-select"}),
-        }
-    )
-
-    if request.method == "POST":
-        form = insuranceAssignmentForm(request.POST)
-        if form.is_valid():
-            form.save()
-            message = "Insurance assignment posted successfully"
-            form = insuranceAssignmentForm()
-            insuranceAssignmentValues = insuranceAssignmentModel.objects.all().order_by("year", "person")
-        else:
-            message = "Please correct the errors below."
-    else:
-        form = insuranceAssignmentForm()
-
-    context = {
-        "fields": fieldNames,
-        "aliasNames": aliasNames,
-        "data": insuranceAssignmentValues,
-        "decimalFields": decimalFields,
-        "form": form,
-        "message": message,
-    }
-
-    return render(request, "WCHDApp/partials/insuranceAssignmentTablePartial.html", context)
-
-def insuranceHome(request):
-    return render(request, "WCHDApp/insuranceHome.html")
-
-def insurancePercentageView(request):
-    return render(request, "WCHDApp/insurancePercentageView.html")
-
-def insurancePercentageTableUpdate(request):
-    message = ""
-
-    insurancePercentageModel = apps.get_model('WCHDApp', "InsurancePercentage")
-    insurancePercentageValues = insurancePercentageModel.objects.all().order_by("start_date", "end_date", "person", "fund")
-
-    fields = [field for field in insurancePercentageModel._meta.fields if field.name != "id"]
-
-    fieldNames = []
-    decimalFields = []
-    aliasNames = []
-
-    for field in fields:
-        if isinstance(field, DecimalField):
-            decimalFields.append(field.name)
-        aliasNames.append(field.verbose_name)
-        fieldNames.append(field.name)
-
-    insurancePercentageForm = modelform_factory(
-        insurancePercentageModel,
-        exclude=[],
-        widgets={
-            "person": forms.Select(attrs={"class": "searchable-select"}),
-            "fund": forms.Select(attrs={"class": "searchable-select"}),
-        }
-    )
-
-    if request.method == "POST":
-        form = insurancePercentageForm(request.POST)
-        if form.is_valid():
-            form.save()
-            message = "Insurance percentage posted successfully"
-            form = insurancePercentageForm()
-            insurancePercentageValues = insurancePercentageModel.objects.all().order_by("start_date", "end_date", "person", "fund")
-        else:
-            message = "Please correct the errors below."
-    else:
-        form = insurancePercentageForm()
-
-    context = {
-        "fields": fieldNames,
-        "aliasNames": aliasNames,
-        "data": insurancePercentageValues,
-        "decimalFields": decimalFields,
-        "form": form,
-        "message": message,
-    }
-
-    return render(request, "WCHDApp/partials/insurancePercentageTablePartial.html", context)

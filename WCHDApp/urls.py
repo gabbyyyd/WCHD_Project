@@ -44,13 +44,8 @@ urlpatterns = [
     path('viewByYearPartial/', views.viewByYearPartial, name='viewByYearPartial'),
     path('updateRevenues/', views.updateRevenues, name='updateRevenues'),
     path('projection/', views.projectionPage, name='projectionPage'),
-    path("projection-chart/", views.projection_chart, name="projection_chart"),
-    path('insurance/', views.insuranceHome, name='insuranceHome'),
-    path('insuranceAssignmentView/', views.insuranceAssignmentView, name='insuranceAssignmentView'),
-    path('insuranceAssignmentTableUpdate/', views.insuranceAssignmentTableUpdate, name='insuranceAssignmentTableUpdate'),
-    path('insurancePercentageView/', views.insurancePercentageView, name='insurancePercentageView'),
-    path('insurancePercentageTableUpdate/', views.insurancePercentageTableUpdate, name='insurancePercentageTableUpdate'),
-    ]
+    path("projection-chart/", views.projection_chart, name="projection_chart"),   
+]
 
     
     
