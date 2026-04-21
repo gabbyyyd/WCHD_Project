@@ -18,6 +18,7 @@ class FundSource(models.TextChoices):
 # used to be called Variable
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 class InsuranceAssignment(models.Model):
     person = models.ForeignKey("People", on_delete=models.CASCADE)
     year = models.PositiveSmallIntegerField()
@@ -71,6 +72,20 @@ class InsuranceRate(models.Model):
 
 >>>>>>> parent of d5ee05c (insurance updates)
 
+=======
+class InsuranceRate(models.Model):
+    name = models.CharField(max_length=50)
+    value = models.DecimalField(max_digits=10, decimal_places=2)
+
+    def __str__(self):
+        return self.name
+
+    class Meta:
+        ordering = ["name"]
+        db_table = "Insurance Rate"
+        verbose_name = "Insurance Rate"
+
+>>>>>>> parent of d5ee05c (insurance updates)
 =======
 class InsuranceRate(models.Model):
     name = models.CharField(max_length=50)

@@ -2042,6 +2042,7 @@ def projection_chart(request):
 
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
 # hello
 
 def projectionPage(request):
@@ -2155,6 +2156,8 @@ def insurancePercentageTableUpdate(request):
 
     return render(request, "WCHDApp/partials/insurancePercentageTablePartial.html", context)
 =======
+=======
+>>>>>>> parent of d5ee05c (insurance updates)
 =======
 >>>>>>> parent of d5ee05c (insurance updates)
 def projectionPage(request):

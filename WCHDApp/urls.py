@@ -46,6 +46,7 @@ urlpatterns = [
     path('projection/', views.projectionPage, name='projectionPage'),
 <<<<<<< HEAD
 <<<<<<< HEAD
+<<<<<<< HEAD
     path("projection-chart/", views.projection_chart, name="projection_chart"),
     path('insurance/', views.insuranceHome, name='insuranceHome'),
     path('insuranceAssignmentView/', views.insuranceAssignmentView, name='insuranceAssignmentView'),
@@ -53,6 +54,10 @@ urlpatterns = [
     path('insurancePercentageView/', views.insurancePercentageView, name='insurancePercentageView'),
     path('insurancePercentageTableUpdate/', views.insurancePercentageTableUpdate, name='insurancePercentageTableUpdate'),
     ]
+=======
+    path("projection-chart/", views.projection_chart, name="projection_chart"),   
+]
+>>>>>>> parent of d5ee05c (insurance updates)
 =======
     path("projection-chart/", views.projection_chart, name="projection_chart"),   
 ]
