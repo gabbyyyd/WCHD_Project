@@ -28,7 +28,6 @@ class InsuranceRate(models.Model):
         db_table = "Insurance Rate"
         verbose_name = "Insurance Rate"
 
-
 # REMINDER TO TAKE OUT null=True and blank=True from all instances of dept once we have a department populated
 class Dept(models.Model):
     dept_id = models.AutoField(primary_key=True, verbose_name="Department ID")
