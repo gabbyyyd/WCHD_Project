@@ -22,24 +22,6 @@
         {% endfor %}
     </table>
 
-    <div class="FormContainer">
-        <form method="POST"
-              hx-post="{% url 'insurancePercentageTableUpdate' %}"
-              hx-target="#tableAndForm"
-              hx-swap="outerHTML">
-            {% csrf_token %}
-
-            {% for field in form %}
-            <div class="FormGroup">
-                {{ field.label_tag }}
-                {{ field }}
-            </div>
-            {% endfor %}
-
-            <button type="submit">Submit</button>
-            <p>{{ message }}</p>
-        </form>
-    </div>
 </div>
 
 <script>

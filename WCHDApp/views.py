@@ -3,7 +3,7 @@ from urllib import request
 
 from django.shortcuts import render, get_object_or_404, redirect
 from django.http import HttpResponse, JsonResponse
-from .models import Fund, Testing, Item, Grant, GrantLine, Revenue, Expense, Line, People
+from .models import Fund, Testing, Item, Grant, GrantLine, Revenue, Expense, Line, People, ActivityList, InsuranceAssignment, InsurancePercentage, InsuranceAllocation, Employee
 from django.db.models.fields.related import ForeignKey, ManyToManyField, OneToOneField
 from .forms import TableSelect, InputSelect, ExportSelect,reconcileForm, FileInput
 from django.forms import modelform_factory, Select
@@ -39,8 +39,10 @@ from django.db.models.functions import Coalesce
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-from django.http import HttpResponseForbidden
-
+from decimal import ROUND_HALF_UP
+from collections import defaultdict
+import calendar
+from datetime import date
 
 
 
@@ -514,44 +516,25 @@ def imports(request):
         if form.is_valid():
             #Pulls data from submitted files
             tableName = form.cleaned_data['table']
-            if tableName == 'Payroll':
-                return redirect('clockifyImportPayroll')
-            selectedFile = form.cleaned_data['file']
-            file = pd.read_csv(selectedFile)
-            columns = file.columns
-            row = file.iloc[0]
-            data = []
+        if tableName == 'Payroll':
+            return redirect('clockifyImportPayroll')
+        selectedFile = form.cleaned_data['file']
+        if tableName == 'InsurancePercentage':
+            success, message = processInsurancePercentageImport(selectedFile)
+            return render(request, "WCHDApp/imports.html", {"form": form, "message": message})
+        file = pd.read_csv(selectedFile)
+        columns = file.columns
+        row = file.iloc[0]
+        data = []
+        #Grab slected model
+        model = apps.get_model('WCHDApp', tableName)
+        fields = model._meta.get_fields()
 
-            #Grab slected model
-            model = apps.get_model('WCHDApp', tableName)
-            fields = model._meta.get_fields()
-
-            #Define what fields we want to look at from the file and model
-            neededFields = []
-            for field in fields:
-                if field.is_relation:
-                        #fks.append(field.name)
-                        if field.auto_created:
-                            continue
-                        else:
-                            #Grab related model. This is why foreign keys have to be named after the model 
-                            parentModel = apps.get_model('WCHDApp', field.name)
-
-                            #Get the related models primary key
-                            fkName = parentModel._meta.pk.name
-                            neededFields.append(fkName)
-                else:
-                    neededFields.append(field.name)
-            if neededFields != list(columns):
-                message = "Bad File. Please check your CSV format and try again."
-                return render(request, "WCHDApp/imports.html", {"form": form, "message": message})
-            lookUpFields = []
-            fks = []
-            #Same logic as above just for lookups and fk
-            for field in fields:
-                #Logic for foreign keys
-                if field.is_relation:
-                    fks.append(field.name)
+        #Define what fields we want to look at from the file and model
+        neededFields = []
+        for field in fields:
+            if field.is_relation:
+                    #fks.append(field.name)
                     if field.auto_created:
                         continue
                     else:
@@ -560,38 +543,58 @@ def imports(request):
 
                         #Get the related models primary key
                         fkName = parentModel._meta.pk.name
-                        #fks.append(fkName)
-                        #Primary keys verbose name
-                        fkAlias = parentModel._meta.pk.verbose_name
+                        neededFields.append(fkName)
+            else:
+                neededFields.append(field.name)
+        if neededFields != list(columns):
+            message = "Bad File. Please check your CSV format and try again."
+            return render(request, "WCHDApp/imports.html", {"form": form, "message": message})
+        lookUpFields = []
+        fks = []
+        #Same logic as above just for lookups and fk
+        for field in fields:
+            #Logic for foreign keys
+            if field.is_relation:
+                fks.append(field.name)
+                if field.auto_created:
+                    continue
                 else:
-                    lookUpFields.append(field)
+                    #Grab related model. This is why foreign keys have to be named after the model 
+                    parentModel = apps.get_model('WCHDApp', field.name)
+
+                    #Get the related models primary key
+                    fkName = parentModel._meta.pk.name
+                    #fks.append(fkName)
+                    #Primary keys verbose name
+                    fkAlias = parentModel._meta.pk.verbose_name
+            else:
+                lookUpFields.append(field)
             
-            #Creating a dictionary for each row in the file
-            for i in range(len(file)):
-                dict = {}
-                row = file.iloc[i]
-                for column in columns:
-                    dict[column] = row[column]
-                data.append(dict)
+        #Creating a dictionary for each row in the file
+        for i in range(len(file)):
+            dict = {}
+            row = file.iloc[i]
+            for column in columns:
+                dict[column] = row[column]
+            data.append(dict)
                 
             #For each entry in the dictionary convert types and then create an object based on the dict
-            for line in data:
-                for key in line:
-                    if type(line[key]) == np.int64:
-                        line[key] = int(line[key])
-                    if key in fks:
-                        parentModel = apps.get_model('WCHDApp', key)
-                        print("Grab the object linked")
-                        line[key] = parentModel.objects.get(pk=line[key])
-                print(line)
-                obj, _ = model.objects.update_or_create(
-                    **line,
-                    defaults = line
-                )    
+        for line in data:
+            for key in line:
+                if type(line[key]) == np.int64:
+                    line[key] = int(line[key])
+                if key in fks:
+                    parentModel = apps.get_model('WCHDApp', key)
+                    print("Grab the object linked")
+                    line[key] = parentModel.objects.get(pk=line[key])
+            print(line)
+            obj, _ = model.objects.update_or_create(
+                **line,
+                defaults = line
+            )    
     else:
         form = InputSelect()
     
-        
     return render(request, "WCHDApp/imports.html", {"form": form, "message": message})
 
 def exports(request):
@@ -2146,7 +2149,7 @@ def insuranceAssignmentTableUpdate(request):
     message = ""
 
     insuranceAssignmentModel = apps.get_model('WCHDApp', "InsuranceAssignment")
-    insuranceAssignmentValues = insuranceAssignmentModel.objects.all().order_by("year", "person")
+    insuranceAssignmentValues = insuranceAssignmentModel.objects.all().order_by("year", "employee")
 
     fields = [field for field in insuranceAssignmentModel._meta.fields if field.name != "id"]
 
@@ -2164,7 +2167,7 @@ def insuranceAssignmentTableUpdate(request):
         insuranceAssignmentModel,
         exclude=[],
         widgets={
-            "person": forms.Select(attrs={"class": "searchable-select"}),
+            "employee": forms.Select(attrs={"class": "searchable-select"}),
         }
     )
 
@@ -2174,7 +2177,7 @@ def insuranceAssignmentTableUpdate(request):
             form.save()
             message = "Insurance assignment posted successfully"
             form = insuranceAssignmentForm()
-            insuranceAssignmentValues = insuranceAssignmentModel.objects.all().order_by("year", "person")
+            insuranceAssignmentValues = insuranceAssignmentModel.objects.all().order_by("year", "employee")
         else:
             message = "Please correct the errors below."
     else:
@@ -2201,7 +2204,7 @@ def insurancePercentageTableUpdate(request):
     message = ""
 
     insurancePercentageModel = apps.get_model('WCHDApp', "InsurancePercentage")
-    insurancePercentageValues = insurancePercentageModel.objects.all().order_by("start_date", "end_date", "person", "fund")
+    insurancePercentageValues = insurancePercentageModel.objects.all().order_by("start_date", "end_date", "employee", "fund")
 
     fields = [field for field in insurancePercentageModel._meta.fields if field.name != "id"]
 
@@ -2230,7 +2233,7 @@ def insurancePercentageTableUpdate(request):
             form.save()
             message = "Insurance percentage posted successfully"
             form = insurancePercentageForm()
-            insurancePercentageValues = insurancePercentageModel.objects.all().order_by("start_date", "end_date", "person", "fund")
+            insurancePercentageValues = insurancePercentageModel.objects.all().order_by("start_date", "end_date", "employee", "fund")
         else:
             message = "Please correct the errors below."
     else:
@@ -2246,3 +2249,179 @@ def insurancePercentageTableUpdate(request):
     }
 
     return render(request, "WCHDApp/partials/insurancePercentageTablePartial.html", context)
+
+
+def getFundFromProject(projectName):
+    if not projectName:
+        return None
+
+    projectName = " ".join(str(projectName).strip().split())
+
+    activity = ActivityList.objects.filter(program__iexact=projectName).select_related("fund").first()
+    if activity:
+        return activity.fund
+
+    return None
+
+def getEmployeeFromClockifyName(userName):
+    if not userName:
+        return None
+
+    cleanedUserName = " ".join(str(userName).strip().split()).lower()
+
+    for employee in Employee.objects.all():
+        employeeName = f"{employee.first_name} {employee.surname}"
+        employeeName = " ".join(employeeName.strip().split()).lower()
+
+        if employeeName == cleanedUserName:
+            return employee
+
+    return None
+
+
+def getMonthDateRange(year, month):
+    lastDay = calendar.monthrange(year, month)[1]
+    monthStart = date(year, month, 1)
+    monthEnd = date(year, month, lastDay)
+    return monthStart, monthEnd
+
+
+def generateInsuranceAllocations(year, month):
+    monthStart, monthEnd = getMonthDateRange(year, month)
+
+    assignments = InsuranceAssignment.objects.filter(
+        year=year,
+        employee__isnull=False
+    ).select_related("employee")
+
+    for assignment in assignments:
+        employee = assignment.employee
+
+        percentageRows = InsurancePercentage.objects.filter(
+            employee=employee,
+            start_date__lte=monthEnd,
+            end_date__gte=monthStart,
+        ).select_related("fund")
+
+        for row in percentageRows:
+            multiplier = Decimal(str(row.percent_of_time)) / Decimal("100.00")
+
+            healthAmount = (assignment.health_rate * multiplier).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            dentalAmount = (assignment.dental_rate * multiplier).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            lifeAmount = (assignment.life_rate * multiplier).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+            InsuranceAllocation.objects.update_or_create(
+                year=year,
+                month=month,
+                employee=employee,
+                fund=row.fund,
+                defaults={
+                    "percent_of_time": row.percent_of_time,
+                    "health": healthAmount,
+                    "dental": dentalAmount,
+                    "life": lifeAmount,
+                }
+            )
+
+def rebuildInsuranceAllocations(year, month):
+    InsuranceAllocation.objects.filter(year=year, month=month).delete()
+    generateInsuranceAllocations(year, month)
+
+def processInsurancePercentageImport(selectedFile):
+    file = pd.read_csv(selectedFile)
+
+    requiredColumns = ["User", "Project", "Start Date", "End Date", "Duration (decimal)"]
+    missingColumns = [col for col in requiredColumns if col not in file.columns]
+
+    if missingColumns:
+        return False, f"Missing required columns: {', '.join(missingColumns)}"
+
+    grouped = defaultdict(lambda: {
+        "total_hours": Decimal("0.00"),
+        "fund_hours": defaultdict(lambda: Decimal("0.00")),
+        "start_date": None,
+        "end_date": None,
+        "employee": None,
+        "fund_objects": {},
+    })
+
+    skippedRows = []
+
+    for _, row in file.iterrows():
+        userName = row["User"]
+        projectName = row["Project"]
+        durationValue = row["Duration (decimal)"]
+
+        try:
+            startDate = pd.to_datetime(row["Start Date"]).date()
+            endDate = pd.to_datetime(row["End Date"]).date()
+            duration = Decimal(str(durationValue))
+        except Exception:
+            skippedRows.append(f"Bad date or duration for user {userName}, project {projectName}")
+            continue
+
+        employee = getEmployeeFromClockifyName(userName)
+        if not employee:
+            skippedRows.append(f"No employee match for user: {userName}")
+            continue
+
+        fund = getFundFromProject(projectName)
+        if not fund:
+            skippedRows.append(f"No fund match for project: {projectName}")
+            continue
+
+        employeeKey = employee.pk
+        grouped[employeeKey]["employee"] = employee
+        grouped[employeeKey]["total_hours"] += duration
+        grouped[employeeKey]["fund_hours"][fund.pk] += duration
+        grouped[employeeKey]["fund_objects"][fund.pk] = fund
+
+        if grouped[employeeKey]["start_date"] is None or startDate < grouped[employeeKey]["start_date"]:
+            grouped[employeeKey]["start_date"] = startDate
+
+        if grouped[employeeKey]["end_date"] is None or endDate > grouped[employeeKey]["end_date"]:
+            grouped[employeeKey]["end_date"] = endDate
+
+    createdCount = 0
+    allocationPeriods = set()
+
+    for _, info in grouped.items():
+        employee = info["employee"]
+        totalHours = info["total_hours"]
+        startDate = info["start_date"]
+        endDate = info["end_date"]
+
+        if totalHours == 0:
+            continue
+
+        if startDate:
+            allocationPeriods.add((startDate.year, startDate.month))
+        if endDate:
+            allocationPeriods.add((endDate.year, endDate.month))
+
+        for fundId, fundHours in info["fund_hours"].items():
+            fund = info["fund_objects"][fundId]
+            percent = (fundHours / totalHours) * Decimal("100.00")
+            percent = percent.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+            InsurancePercentage.objects.update_or_create(
+                employee=employee,
+                fund=fund,
+                start_date=startDate,
+                end_date=endDate,
+                defaults={
+                    "percent_of_time": percent,
+                }
+            )
+            createdCount += 1
+
+    for year, month in allocationPeriods:
+        rebuildInsuranceAllocations(year, month)
+
+    if skippedRows:
+        print("Skipped rows:")
+        for row in skippedRows:
+            print(row)
+        return True, f"Imported {createdCount} insurance percentage rows and updated insurance allocations. Some rows were skipped."
+
+    return True, f"Imported {createdCount} insurance percentage rows and updated insurance allocations successfully."
