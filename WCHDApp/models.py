@@ -17,7 +17,7 @@ class FundSource(models.TextChoices):
 
 # used to be called Variable
 class InsuranceAssignment(models.Model):
-    person = models.ForeignKey("People", on_delete=models.CASCADE)
+    employee = models.ForeignKey("Employee", on_delete=models.CASCADE, null=True, blank=True)
     year = models.PositiveSmallIntegerField()
 
     health_type = models.CharField(max_length=50, blank=True)
@@ -30,31 +30,51 @@ class InsuranceAssignment(models.Model):
     life_rate = models.DecimalField(max_digits=10, decimal_places=2, default=0)
 
     def __str__(self):
-        return f"{self.person} - {self.year}"
+        return f"{self.employee} - {self.year}"
 
     class Meta:
-        ordering = ["year", "person"]
+        ordering = ["year", "employee"]
         db_table = "Insurance Rate"
         verbose_name = "Insurance Assignment"
         verbose_name_plural = "Insurance Assignments"
-        unique_together = ("person", "year")
+        unique_together = ("employee", "year")
 
 class InsurancePercentage(models.Model):
-    person = models.ForeignKey("People", on_delete=models.CASCADE)
+    employee = models.ForeignKey("Employee", on_delete=models.CASCADE, null=True, blank=True)
     fund = models.ForeignKey("Fund", on_delete=models.CASCADE)
     start_date = models.DateField(null=True, blank=True)
     end_date = models.DateField(null=True, blank=True)
     percent_of_time = models.DecimalField(max_digits=6, decimal_places=2)
+    activityList = models.ForeignKey("ActivityList", on_delete=models.SET_NULL, null=True, blank=True, verbose_name="Activity List")
 
     def __str__(self):
-        return f"{self.person} - {self.fund} - {self.start_date} to {self.end_date}"
+        return f"{self.employee} - {self.fund} - {self.start_date} to {self.end_date}"
 
     class Meta:
-        ordering = ["start_date", "end_date", "person", "fund"]
+        ordering = ["start_date", "end_date", "employee", "fund"]
         db_table = "Insurance Percentage"
         verbose_name = "Insurance Percentage"
         verbose_name_plural = "Insurance Percentages"
 
+class InsuranceAllocation(models.Model):
+    year = models.IntegerField(verbose_name="Year")
+    month = models.IntegerField(verbose_name="Month")
+    employee = models.ForeignKey("Employee", on_delete=models.CASCADE, verbose_name="Employee", null=True, blank=True)
+    fund = models.ForeignKey("Fund", on_delete=models.CASCADE, verbose_name="Fund")
+    percent_of_time = models.DecimalField(max_digits=6, decimal_places=2, verbose_name="Percent Of Time", default=0)
+    health = models.DecimalField(max_digits=10, decimal_places=2, verbose_name="Health", default=0)
+    dental = models.DecimalField(max_digits=10, decimal_places=2, verbose_name="Dental", default=0)
+    life = models.DecimalField(max_digits=10, decimal_places=2, verbose_name="Life", default=0)
+
+    def __str__(self):
+        return f"{self.employee} - {self.fund} - {self.year}-{self.month}"
+
+    class Meta:
+        ordering = ["year", "month", "employee", "fund"]
+        db_table = "Insurance Allocation"
+        verbose_name = "Insurance Allocation"
+        verbose_name_plural = "Insurance Allocations"
+        unique_together = ("year", "month", "employee", "fund")
 
 # REMINDER TO TAKE OUT null=True and blank=True from all instances of dept once we have a department populated
 class Dept(models.Model):

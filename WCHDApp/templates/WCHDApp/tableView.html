@@ -21,13 +21,15 @@
         </tr>
         {% for row in data%}
             <tr>
-            {% for field in fields%}
-                {% if field in decimalFields %}
-                    <td style="text-align: right;">{{row|get_attr:field|money}}</td>
+            {% for field in fields %}
+                {% if field == "percent_of_time" %}
+                    <td style="text-align: right;">{{ row|get_attr:field }}%</td>
+                {% elif field in decimalFields %}
+                    <td style="text-align: right;">{{ row|get_attr:field|money }}</td>
                 {% else %}
-                    <td>{{row|get_attr:field}}</td>
+                    <td>{{ row|get_attr:field }}</td>
                 {% endif %}
-            {% endfor%}
+            {% endfor %}
             </tr>
         {% endfor %}
     </table>
