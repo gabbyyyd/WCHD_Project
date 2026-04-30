@@ -411,7 +411,7 @@ def tableView(request, tableName):
         "Testing": [("fundBalanceMinus3", "Fund Balance Minus 3")],
         "Benefits": [("pers", "Public Employee Retirement System"), ("medicare", "Medicare"),("wc", "Workers Comp"), ("plar", "Paid Leave Accumulation Rate"), ("vacation", "Vacation"), ("sick", "Sick Leave"), ("holiday", "Holiday Leave"), ("total_hrly", "Total Hourly Cost"), ("percent_leave", "Percent Leave"), ("monthly_hours", "Monthly Hours"), ("board_share_hrly", "Board Share Hourly"), ("life_hourly", "Life Hourly"), ("salary", "Salary"), ("fringes", "Fringes"), ("total_comp", "Total Compensation")],
         "Payroll": [("pay_rate", "Pay Rate")],
-        "Fund":[("calcRemaining", "Remaining"), ("budgeted", "Budgeted"), ("actualRevenue", "Actual Revenue"), ("actualExpense", "Actual Expense"),("budgetedRevenue", "Budgeted Revenue"),("budgetedExpense", "Budgeted Expense"),],
+        "Fund":[("calcRemaining", "Remaining Expense"), ("actualRevenue", "Actual Revenue"), ("budgetedRevenue", "Budgeted Revenue"),("budgetedExpense", "Budgeted Expense"),],
         "GrantLine": [("budgetRemaining", "Budget Remaining"), ("budgetSpent", "Budget Spent"), ("totalIncome", "Total Income")],
         "Grant": [("grantAwardAmountRemaining", "Grant Award Amount Remaining"),( "recieved","Recieved")]
     }
@@ -429,8 +429,6 @@ def tableView(request, tableName):
     aliasNames = []
     decimalFields = []
     for field in fields:
-        if tableName == "Fund" and field.name == "sof":
-            continue
         if isinstance(field, DecimalField):
                 decimalFields.append(field.name)
         aliasNames.append(field.verbose_name)  
@@ -1102,7 +1100,6 @@ def itemTableUpdate(request):
         form = modelform_factory(Item, exclude=["line", "fund", "fund_year", "fund_type"])(request.POST)
         form.instance.line = line
         form.instance.fund = line.fund
-        form.instance.fund_type = line.fund.sof
         form.instance.fund_year = line.fund_year
     
         if form.is_valid():

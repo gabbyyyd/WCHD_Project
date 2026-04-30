@@ -99,15 +99,11 @@ class Fund(models.Model):
     fund_cash_balance = models.DecimalField(
         max_digits=15, decimal_places=2, verbose_name="Cash Balance"
     )
-    fund_total = models.DecimalField(
-        max_digits=15, decimal_places=2, verbose_name="Revenue"
-    )
+    
     dept = models.ForeignKey(
         Dept, on_delete=models.CASCADE, null=True, blank=True, verbose_name="Department"
     )
-    sof = models.CharField(
-        max_length=10, blank=False, choices=FundSource.choices, verbose_name="SoF"
-    )
+    
 
     @property
     def full_fund_id(self):
@@ -305,7 +301,7 @@ class Item(models.Model):
     item_id = models.AutoField(primary_key=True, verbose_name="Item ID")
     fund = models.ForeignKey(Fund, on_delete=models.CASCADE, verbose_name="Fund")
     fund_type = models.CharField(
-        max_length=50, choices=FundSource.choices, verbose_name="Fund Type"
+        max_length=50, choices=FundSource.choices,blank=True, null=True, verbose_name="Fund Type"
     )
     line = models.ForeignKey(Line, on_delete=models.CASCADE, verbose_name="Line")
     fund_year = models.IntegerField(verbose_name="Fund Year")
@@ -321,7 +317,6 @@ class Item(models.Model):
 
         if creating:
             self.fund = self.line.fund
-            self.fund_type = self.line.fund.sof
             self.fund_year = self.line.fund_year
 
         self.full_clean()
