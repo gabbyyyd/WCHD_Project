@@ -45,7 +45,6 @@ class InsurancePercentage(models.Model):
     start_date = models.DateField(null=True, blank=True)
     end_date = models.DateField(null=True, blank=True)
     percent_of_time = models.DecimalField(max_digits=6, decimal_places=2)
-    activityList = models.ForeignKey("ActivityList", on_delete=models.SET_NULL, null=True, blank=True, verbose_name="Activity List")
 
     def __str__(self):
         return f"{self.employee} - {self.fund} - {self.start_date} to {self.end_date}"
