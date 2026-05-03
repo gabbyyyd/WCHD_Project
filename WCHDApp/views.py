@@ -409,7 +409,6 @@ def tableView(request, tableName):
     #Any property that we define in models need to go here so our logic can include them in the table
     calculatedProperties = {
         "Testing": [("fundBalanceMinus3", "Fund Balance Minus 3")],
-        "Benefits": [("pers", "Public Employee Retirement System"), ("medicare", "Medicare"),("wc", "Workers Comp"), ("plar", "Paid Leave Accumulation Rate"), ("vacation", "Vacation"), ("sick", "Sick Leave"), ("holiday", "Holiday Leave"), ("total_hrly", "Total Hourly Cost"), ("percent_leave", "Percent Leave"), ("monthly_hours", "Monthly Hours"), ("board_share_hrly", "Board Share Hourly"), ("life_hourly", "Life Hourly"), ("salary", "Salary"), ("fringes", "Fringes"), ("total_comp", "Total Compensation")],
         "Payroll": [("pay_rate", "Pay Rate")],
         "Fund":[("calcRemaining", "Remaining Expense"), ("actualRevenue", "Actual Revenue"), ("budgetedRevenue", "Budgeted Revenue"),("budgetedExpense", "Budgeted Expense"),],
         "GrantLine": [("budgetRemaining", "Budget Remaining"), ("budgetSpent", "Budget Spent"), ("totalIncome", "Total Income")],
@@ -988,7 +987,6 @@ def lineTableUpdate(request):
 
     calculatedProperties = {
         "Testing": [("fundBalanceMinus3", "Fund Balance Minus 3")],
-        "Benefits": [("pers", "Public Employee Retirement System"), ("medicare", "Medicare"),("wc", "Workers Comp"), ("plar", "Paid Leave Accumulation Rate"), ("vacation", "Vacation"), ("sick", "Sick Leave"), ("holiday", "Holiday Leave"), ("total_hrly", "Total Hourly Cost"), ("percent_leave", "Percent Leave"), ("monthly_hours", "Monthly Hours"), ("board_share_hrly", "Board Share Hourly"), ("life_hourly", "Life Hourly"), ("salary", "Salary"), ("fringes", "Fringes"), ("total_comp", "Total Compensation")],
         "Payroll": [("pay_rate", "Pay Rate")],
         "Fund":[("calcRemaining", "Remaining"), ("budgeted", "Budgeted")],
         "Line": [("budgetRemaining", "Budget Remaining"), ("budgetSpent", "Budget Spent"), ("totalIncome", "Total Income")]
@@ -1069,7 +1067,6 @@ def itemTableUpdate(request):
 
     calculatedProperties = {
         "Testing": [("fundBalanceMinus3", "Fund Balance Minus 3")],
-        "Benefits": [("pers", "Public Employee Retirement System"), ("medicare", "Medicare"),("wc", "Workers Comp"), ("plar", "Paid Leave Accumulation Rate"), ("vacation", "Vacation"), ("sick", "Sick Leave"), ("holiday", "Holiday Leave"), ("total_hrly", "Total Hourly Cost"), ("percent_leave", "Percent Leave"), ("monthly_hours", "Monthly Hours"), ("board_share_hrly", "Board Share Hourly"), ("life_hourly", "Life Hourly"), ("salary", "Salary"), ("fringes", "Fringes"), ("total_comp", "Total Compensation")],
         "Payroll": [("pay_rate", "Pay Rate")],
         "Fund":[("calcRemaining", "Remaining"), ("budgeted", "Budgeted")],
         "Line": [("budgetRemaining", "Budget Remaining"), ("budgetSpent", "Budget Spent"), ("totalIncome", "Total Income")],
@@ -1952,7 +1949,7 @@ def viewByYear(request):
     year = currentDate.year
     years = list(range(2000, year+2))
 
-    models = ["Fund", "Line", "Item", "Revenue", "GrantLine", "Testing", "Benefits", "Payroll"]
+    models = ["Fund", "Line", "Item", "Revenue", "GrantLine", "Testing", "Payroll"]
 
     context = {
         "years": years,
@@ -1966,7 +1963,6 @@ def viewByYearPartial(request):
     #Any property that we define in models need to go here so our logic can include them in the table
     calculatedProperties = {
         "Testing": [("fundBalanceMinus3", "Fund Balance Minus 3")],
-        "Benefits": [("pers", "Public Employee Retirement System"), ("medicare", "Medicare"),("wc", "Workers Comp"), ("plar", "Paid Leave Accumulation Rate"), ("vacation", "Vacation"), ("sick", "Sick Leave"), ("holiday", "Holiday Leave"), ("total_hrly", "Total Hourly Cost"), ("percent_leave", "Percent Leave"), ("monthly_hours", "Monthly Hours"), ("board_share_hrly", "Board Share Hourly"), ("life_hourly", "Life Hourly"), ("salary", "Salary"), ("fringes", "Fringes"), ("total_comp", "Total Compensation")],
         "Payroll": [("pay_rate", "Pay Rate")],
         "Fund":[("calcRemaining", "Remaining")]
     }
@@ -2064,7 +2060,6 @@ def testingTableViewFunction(request, tableName):
     #Any property that we define in models need to go here so our logic can include them in the table
     calculatedProperties = {
         "Testing": [("fundBalanceMinus3", "Fund Balance Minus 3")],
-        "Benefits": [("pers", "Public Employee Retirement System"), ("medicare", "Medicare"),("wc", "Workers Comp"), ("plar", "Paid Leave Accumulation Rate"), ("vacation", "Vacation"), ("sick", "Sick Leave"), ("holiday", "Holiday Leave"), ("total_hrly", "Total Hourly Cost"), ("percent_leave", "Percent Leave"), ("monthly_hours", "Monthly Hours"), ("board_share_hrly", "Board Share Hourly"), ("life_hourly", "Life Hourly"), ("salary", "Salary"), ("fringes", "Fringes"), ("total_comp", "Total Compensation")],
         "Payroll": [("pay_rate", "Pay Rate")],
         "Fund":[("calcRemaining", "Remaining"), ("budgeted", "Budgeted")],
         "GrantLine": [("budgetRemaining", "Budget Remaining"), ("budgetSpent", "Budget Spent"), ("totalIncome", "Total Income")],
