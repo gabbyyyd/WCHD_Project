@@ -5,7 +5,7 @@ from django.shortcuts import render, get_object_or_404, redirect
 from django.http import HttpResponse, JsonResponse
 from .models import Fund, Testing, Item, Grant, GrantLine, Revenue, Expense, Line, People, ActivityList, InsuranceAssignment, InsurancePercentage, InsuranceAllocation, Employee
 from django.db.models.fields.related import ForeignKey, ManyToManyField, OneToOneField
-from .forms import TableSelect, InputSelect, ExportSelect,reconcileForm, FileInput
+from .forms import TableSelect, InputSelect, ExportSelect,reconcileForm, FileInput, ProjectionCalcForm
 from django.forms import modelform_factory, Select
 from django import forms
 from django.apps import apps
@@ -39,6 +39,9 @@ from django.db.models.functions import Coalesce
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+from matplotlib.ticker import FuncFormatter
+import io
+import base64
 from decimal import ROUND_HALF_UP
 from collections import defaultdict
 import calendar
@@ -94,10 +97,6 @@ def generate_pdf(request, tableName):
 
     elements.append(Spacer(1, 12))
     elements.append(Paragraph("Washington County Health Department", title_style))
-    elements.append(Paragraph(
-        "List of Active Grants. Active means they have been awarded and the final expenditure report has not yet been approved.",
-        subtitle_style
-    ))
     elements.append(Spacer(1, 12))
 
 
@@ -289,6 +288,8 @@ def reports(request):
             tableName = form.cleaned_data['table'] 
             if button == "daily":
                 return redirect('dailyReport')
+            if tableName == "InsuranceReports":
+                return redirect("insuranceReports")
             else:
                 return redirect('generate_pdf', tableName)
     else:
@@ -1472,9 +1473,11 @@ def clockifyImportPayroll(request, *args, **kwargs):
                         else:
                             item = activity.item
 
-                        payRate = float(paidEmployee.pay_rate)
-                        hours = line['hours']
+                        payRate = Decimal(str(paidEmployee.pay_rate))
+                        hours = Decimal(str(line["hours"]))
+
                         amount = payRate * hours
+                        amount = amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
                         # Match people
                         try:
@@ -1532,6 +1535,18 @@ def clockifyImportPayroll(request, *args, **kwargs):
 
                         # Only used for duplicates
                         line.pop("startTime", None)
+
+                        if "pay_amount" in line and line["pay_amount"] is not None:
+                            line["pay_amount"] = Decimal(str(line["pay_amount"])).quantize(
+                                Decimal("0.01"),
+                                rounding=ROUND_HALF_UP
+                            )
+
+                        if "hours" in line and line["hours"] is not None:
+                            line["hours"] = Decimal(str(line["hours"])).quantize(
+                                Decimal("0.01"),
+                                rounding=ROUND_HALF_UP
+    )
 
                         payrollModel.objects.update_or_create(
                             **line,
@@ -2135,22 +2150,63 @@ def updateRevenues(request):
     return render(request, "WCHDApp/testing.html")
 
 def projection_chart(request):
-    # random data for testing
-    x = np.arange(10)
-    y = np.random.randint(10, 100, size=10)
 
-    plt.figure()
-    plt.plot(x, y, marker='o')
-    plt.title("WCHD Revenue Projection")
-    plt.xlabel("Month")
-    plt.ylabel("Revenue")
+    result = None
+    result_image = None
+    form = ProjectionCalcForm()
+    labels = None
+    values = None
 
-    buffer = BytesIO()
-    plt.savefig(buffer, format="png")
-    plt.close()
+    if request.method == "POST":
+        form = ProjectionCalcForm(request.POST)
+        if form.is_valid():
+            employee_id = form.cleaned_data['employee_id']
+            employee = Employee.objects.get(employee_id=employee_id)
+            request.session["employee_id"] = employee.employee_id
+            salary = float(employee.pay_rate * 40 * 52)
+            workersComp = salary * float(0.01)
+            medicare = salary * float(0.0145)
+            opers = salary * float(0.14)
+            expense = salary + workersComp + medicare + opers
+            result = (
+                f"Estimated expense for this employee:\n"
+                f"Salary: ${salary:,.2f}\n"
+                f"OPERS: ${opers:,.2f}\n"
+                f"Medicare: ${medicare:,.2f}\n"
+                f"Workers Comp: ${workersComp:,.2f}\n"
+                f"Total: ${expense:,.2f}"
+            )
 
-    buffer.seek(0)
-    return HttpResponse(buffer.getvalue(), content_type="image/png")
+            fig, ax = plt.subplots()
+
+            components = ["Salary", "OPERS", "Medicare", "Workers Comp"]
+            values = [salary, opers, medicare, workersComp]
+
+            colors = ["#4CAF50", "#2196F3", "#FF9800", "#F44336"]
+
+            bottom = 0
+            for i in range(len(values)):
+                ax.bar("Total Expense", values[i], bottom=bottom, label=components[i], color=colors[i])
+                bottom += values[i]
+
+            ax.set_title("Expense Breakdown")
+
+            def money(x, pos):
+                return f'${x:,.0f}'
+
+            ax.yaxis.set_major_formatter(FuncFormatter(money))
+            ax.legend()
+
+            buf = io.BytesIO()
+            plt.savefig(buf, format="png")
+            buf.seek(0)
+
+            image_base64 = base64.b64encode(buf.getvalue()).decode()
+
+            result_image = image_base64
+    else:
+        print("Invalid form submission")
+    return render(request, "WCHDApp/projections.html", {"form": form, "result": result, "labels": labels, "values": values, "result_image": result_image})
 
 # hello
 
@@ -2440,3 +2496,314 @@ def processInsurancePercentageImport(selectedFile):
         return True, f"Imported {createdCount} insurance percentage rows and updated insurance allocations. Some rows were skipped."
 
     return True, f"Imported {createdCount} insurance percentage rows and updated insurance allocations successfully."
+
+def getFormattedFundCode(fund):
+    return f"{fund.year} {str(fund.fund_id).zfill(4)}"
+
+def getProgramNameFromFund(fund):
+    activity = ActivityList.objects.filter(fund=fund).order_by("program").first()
+    if activity:
+        return activity.program
+    return f"{fund.year} {str(fund.fund_id).zfill(4)}"
+
+def getInsuranceReportItem(fund):
+    item = Item.objects.filter(
+        fund=fund,
+        fund_year=fund.year,
+        item_name__iexact="Premium Payment"
+    ).select_related("line").first()
+
+    if item:
+        return item
+
+    return Item.objects.filter(
+        fund=fund,
+        fund_year=fund.year
+    ).select_related("line").first()
+
+def buildInsuranceByFund(year, month):
+    allocations = InsuranceAllocation.objects.filter(
+        year=year,
+        month=month
+    ).select_related("fund", "employee").order_by("fund", "employee")
+
+    grouped = defaultdict(lambda: {
+        "fund": None,
+        "fund_code": "",
+        "premium_payment": Decimal("0.00"),
+        "budget_available": Decimal("0.00"),
+        "cash_balance": Decimal("0.00"),
+        "rows": [],
+    })
+
+    for row in allocations:
+        fund = row.fund
+        fundId = fund.pk
+        rowTotal = row.health + row.dental
+
+        item = getInsuranceReportItem(fund)
+        line = item.line if item else None
+
+        grouped[fundId]["fund"] = fund
+        grouped[fundId]["fund_code"] = f"{fund.year} {str(fund.fund_id).zfill(4)}"
+        grouped[fundId]["premium_payment"] += rowTotal
+        grouped[fundId]["cash_balance"] = fund.fund_cash_balance
+
+        if line:
+            grouped[fundId]["budget_available"] = line.budgetRemaining
+
+        grouped[fundId]["rows"].append({
+            "employee": str(row.employee),
+            "total": rowTotal,
+        })
+
+    return list(grouped.values())
+
+
+def buildInsuranceByEmployee(year, month):
+    allocations = InsuranceAllocation.objects.filter(
+        year=year,
+        month=month
+    ).select_related("fund", "employee").order_by("employee", "fund")
+
+    grouped = defaultdict(lambda: {
+        "employee": None,
+        "grand_total": Decimal("0.00"),
+        "rows": [],
+    })
+
+    for row in allocations:
+        rowTotal = row.health + row.dental
+        employeeId = row.employee.pk
+
+        grouped[employeeId]["employee"] = str(row.employee)
+        grouped[employeeId]["grand_total"] += rowTotal
+        grouped[employeeId]["rows"].append({
+            "program": getProgramNameFromFund(row.fund),
+            "total": rowTotal,
+        })
+
+    return list(grouped.values())
+
+
+def buildInsuranceForTrena(year, month):
+    allocations = InsuranceAllocation.objects.filter(
+        year=year,
+        month=month
+    ).select_related("fund")
+
+    grouped = defaultdict(lambda: {
+        "fund": None,
+        "fund_code": "",
+        "premium_payment": Decimal("0.00"),
+        "budget_available": Decimal("0.00"),
+        "cash_balance": Decimal("0.00"),
+    })
+
+    for row in allocations:
+        fund = row.fund
+        fundId = fund.pk
+        rowTotal = row.health + row.dental
+
+        item = getInsuranceReportItem(fund)
+        line = item.line if item else None
+
+        grouped[fundId]["fund"] = fund
+        grouped[fundId]["fund_code"] = f"{fund.year} {str(fund.fund_id).zfill(4)}"
+        grouped[fundId]["premium_payment"] += rowTotal
+        grouped[fundId]["cash_balance"] = fund.fund_cash_balance
+
+        if line:
+            grouped[fundId]["budget_available"] = line.budgetRemaining
+
+    return list(grouped.values())
+
+@permission_required('WCHDApp.has_full_access', raise_exception=True)
+def insuranceReports(request):
+    allocationYears = list(
+        InsuranceAllocation.objects.order_by("year")
+        .values_list("year", flat=True)
+        .distinct()
+    )
+
+    assignmentYears = list(
+        InsuranceAssignment.objects.order_by("year")
+        .values_list("year", flat=True)
+        .distinct()
+    )
+
+    availableYears = sorted(set(allocationYears + assignmentYears))
+    if not availableYears:
+        availableYears = [date.today().year]
+
+    context = {
+        "availableYears": availableYears,
+        "months": [
+            (1, "January"), (2, "February"), (3, "March"), (4, "April"),
+            (5, "May"), (6, "June"), (7, "July"), (8, "August"),
+            (9, "September"), (10, "October"), (11, "November"), (12, "December"),
+        ]
+    }
+
+    if request.method == "POST":
+        year = int(request.POST.get("year"))
+        month = int(request.POST.get("month"))
+        reportType = request.POST.get("report_type")
+
+        return redirect("insuranceReportsPDF", year=year, month=month, report_type=reportType)
+
+    return render(request, "WCHDApp/insuranceReports.html", context)
+
+@permission_required('WCHDApp.has_full_access', raise_exception=True)
+def insuranceReportsPDF(request, year, month, report_type):
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=landscape(letter))
+    elements = []
+    styles = getSampleStyleSheet()
+
+    title_style = ParagraphStyle(
+        "TitleStyle",
+        parent=styles["Title"],
+        fontSize=16,
+        spaceAfter=11,
+        fontName="Helvetica-Bold"
+    )
+
+    table_text_style = ParagraphStyle(
+        "TableText",
+        parent=styles["Normal"],
+        fontSize=7,
+        leading=8,
+        wordWrap='CJK',
+        alignment=0
+    )
+
+    header_style = ParagraphStyle(
+        "HeaderStyle",
+        parent=styles["Normal"],
+        fontSize=7,
+        leading=8,
+        alignment=1,
+        fontName="Helvetica-Bold"
+    )
+
+    elements.append(Spacer(1, 12))
+    elements.append(Paragraph("Washington County Health Department", title_style))
+    elements.append(Paragraph(f"Health Department Insurance Breakdown for {month:02d}/{year}", styles["Heading2"]))
+    elements.append(Spacer(1, 10))
+
+    if report_type == "fund":
+        reportData = buildInsuranceByFund(year, month)
+
+        for group in reportData:
+            elements.append(
+                Paragraph(
+                    f"<b>Fund {group['fund_code']}</b> &nbsp;&nbsp; "
+                    f"<b>Premium Payment:</b> ${group['premium_payment']:,.2f} &nbsp;&nbsp; "
+                    f"<b>Budget Available:</b> ${group['budget_available']:,.2f} &nbsp;&nbsp; "
+                    f"<b>Cash Balance:</b> ${group['cash_balance']:,.2f}",
+                    styles["Normal"]
+                )
+            )
+            elements.append(Spacer(1, 6))
+
+            data = [[
+                Paragraph("Employee", header_style),
+                Paragraph("Total Insurance", header_style),
+            ]]
+
+            for row in group["rows"]:
+                data.append([
+                    Paragraph(row["employee"], table_text_style),
+                    Paragraph(f'${row["total"]:,.2f}', table_text_style),
+                ])
+
+            table = Table(data, colWidths=[4.5*inch, 2.0*inch])
+            table.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (-1, 0), colors.darkgray),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                ("GRID", (0, 0), (-1, -1), 1, colors.black),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("BACKGROUND", (0, 1), (-1, -1), colors.whitesmoke),
+            ]))
+            elements.append(table)
+            elements.append(Spacer(1, 12))
+
+        filename = f"insurance_by_fund_{year}_{month:02d}.pdf"
+
+    elif report_type == "employee":
+        reportData = buildInsuranceByEmployee(year, month)
+
+        for group in reportData:
+            elements.append(Paragraph(f"<b>{group['employee']}</b>", styles["Normal"]))
+            elements.append(Spacer(1, 6))
+
+            data = [[
+                Paragraph("Program", header_style),
+                Paragraph("Total Insurance", header_style),
+            ]]
+
+            for row in group["rows"]:
+                data.append([
+                    Paragraph(row["program"], table_text_style),
+                    Paragraph(f'${row["total"]:,.2f}', table_text_style),
+                ])
+
+            data.append([
+                Paragraph("Grand Total", header_style),
+                Paragraph(f'${group["grand_total"]:,.2f}', header_style),
+            ])
+
+            table = Table(data, colWidths=[4.5*inch, 2.0*inch])
+            table.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (-1, 0), colors.darkgray),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                ("GRID", (0, 0), (-1, -1), 1, colors.black),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("BACKGROUND", (0, 1), (-1, -2), colors.whitesmoke),
+                ("BACKGROUND", (0, -1), (-1, -1), colors.lightgrey),
+            ]))
+            elements.append(table)
+            elements.append(Spacer(1, 12))
+
+        filename = f"insurance_by_employee_{year}_{month:02d}.pdf"
+
+    else:
+        reportData = buildInsuranceForTrena(year, month)
+
+        data = [[
+            Paragraph("Fund", header_style),
+            Paragraph("Premium Payment", header_style),
+            Paragraph("Budget Available", header_style),
+            Paragraph("Cash Balance", header_style),
+        ]]
+
+        for group in reportData:
+            data.append([
+                Paragraph(group["fund_code"], table_text_style),
+                Paragraph(f'${group["premium_payment"]:,.2f}', table_text_style),
+                Paragraph(f'${group["budget_available"]:,.2f}', table_text_style),
+                Paragraph(f'${group["cash_balance"]:,.2f}', table_text_style),
+            ])
+
+        table = Table(data, colWidths=[1.5*inch, 1.8*inch, 1.8*inch, 1.8*inch])
+        table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.darkgray),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("GRID", (0, 0), (-1, -1), 1, colors.black),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("BACKGROUND", (0, 1), (-1, -1), colors.whitesmoke),
+        ]))
+        elements.append(table)
+
+        filename = f"insurance_for_trena_{year}_{month:02d}.pdf"
+
+    doc.build(elements)
+
+    buffer.seek(0)
+    pdf_data = buffer.getvalue()
+    buffer.close()
+
+    response = HttpResponse(pdf_data, content_type="application/pdf")
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return response

@@ -119,5 +119,7 @@ class ModelSelectForm(forms.Form):
         modelsDict[model.__name__] = model.__name__
     table = forms.ChoiceField(choices=modelsDict, label="Select Table", required=True,  widget=forms.Select(attrs={'class': 'searchable-select'}))
     
+class ProjectionCalcForm(forms.Form):
     
+    employee_id = forms.FloatField(label="Enter Employee ID:", required=True)
     

@@ -50,6 +50,8 @@ urlpatterns = [
     path('insuranceAssignmentTableUpdate/', views.insuranceAssignmentTableUpdate, name='insuranceAssignmentTableUpdate'),
     path('insurancePercentageView/', views.insurancePercentageView, name='insurancePercentageView'),
     path('insurancePercentageTableUpdate/', views.insurancePercentageTableUpdate, name='insurancePercentageTableUpdate'),
+    path("insuranceReports/", views.insuranceReports, name="insuranceReports"),
+    path("insuranceReportsPDF/<int:year>/<int:month>/<str:report_type>/", views.insuranceReportsPDF, name="insuranceReportsPDF"),
     ]
 
     
