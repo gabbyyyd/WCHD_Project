@@ -5,7 +5,7 @@ from django.shortcuts import render, get_object_or_404, redirect
 from django.http import HttpResponse, JsonResponse
 from .models import Fund, Testing, Item, Grant, GrantLine, Revenue, Expense, Line, People, ActivityList, InsuranceAssignment, InsurancePercentage, InsuranceAllocation, Employee
 from django.db.models.fields.related import ForeignKey, ManyToManyField, OneToOneField
-from .forms import TableSelect, InputSelect, ExportSelect,reconcileForm, FileInput
+from .forms import TableSelect, InputSelect, ExportSelect,reconcileForm, FileInput, ProjectionCalcForm
 from django.forms import modelform_factory, Select
 from django import forms
 from django.apps import apps
@@ -39,6 +39,9 @@ from django.db.models.functions import Coalesce
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+from matplotlib.ticker import FuncFormatter
+import io
+import base64
 from decimal import ROUND_HALF_UP
 from collections import defaultdict
 import calendar
@@ -2110,22 +2113,63 @@ def updateRevenues(request):
     return render(request, "WCHDApp/testing.html")
 
 def projection_chart(request):
-    # random data for testing
-    x = np.arange(10)
-    y = np.random.randint(10, 100, size=10)
 
-    plt.figure()
-    plt.plot(x, y, marker='o')
-    plt.title("WCHD Revenue Projection")
-    plt.xlabel("Month")
-    plt.ylabel("Revenue")
+    result = None
+    result_image = None
+    form = ProjectionCalcForm()
+    labels = None
+    values = None
 
-    buffer = BytesIO()
-    plt.savefig(buffer, format="png")
-    plt.close()
+    if request.method == "POST":
+        form = ProjectionCalcForm(request.POST)
+        if form.is_valid():
+            employee_id = form.cleaned_data['employee_id']
+            employee = Employee.objects.get(employee_id=employee_id)
+            request.session["employee_id"] = employee.employee_id
+            salary = float(employee.pay_rate * 40 * 52)
+            workersComp = salary * float(0.01)
+            medicare = salary * float(0.0145)
+            opers = salary * float(0.14)
+            expense = salary + workersComp + medicare + opers
+            result = (
+                f"Estimated expense for this employee:\n"
+                f"Salary: ${salary:,.2f}\n"
+                f"OPERS: ${opers:,.2f}\n"
+                f"Medicare: ${medicare:,.2f}\n"
+                f"Workers Comp: ${workersComp:,.2f}\n"
+                f"Total: ${expense:,.2f}"
+            )
 
-    buffer.seek(0)
-    return HttpResponse(buffer.getvalue(), content_type="image/png")
+            fig, ax = plt.subplots()
+
+            components = ["Salary", "OPERS", "Medicare", "Workers Comp"]
+            values = [salary, opers, medicare, workersComp]
+
+            colors = ["#4CAF50", "#2196F3", "#FF9800", "#F44336"]
+
+            bottom = 0
+            for i in range(len(values)):
+                ax.bar("Total Expense", values[i], bottom=bottom, label=components[i], color=colors[i])
+                bottom += values[i]
+
+            ax.set_title("Expense Breakdown")
+
+            def money(x, pos):
+                return f'${x:,.0f}'
+
+            ax.yaxis.set_major_formatter(FuncFormatter(money))
+            ax.legend()
+
+            buf = io.BytesIO()
+            plt.savefig(buf, format="png")
+            buf.seek(0)
+
+            image_base64 = base64.b64encode(buf.getvalue()).decode()
+
+            result_image = image_base64
+    else:
+        print("Invalid form submission")
+    return render(request, "WCHDApp/projections.html", {"form": form, "result": result, "labels": labels, "values": values, "result_image": result_image})
 
 # hello
 
