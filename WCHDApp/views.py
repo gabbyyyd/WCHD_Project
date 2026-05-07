@@ -1450,9 +1450,11 @@ def clockifyImportPayroll(request, *args, **kwargs):
                         else:
                             item = activity.item
 
-                        payRate = float(paidEmployee.pay_rate)
-                        hours = line['hours']
+                        payRate = Decimal(str(paidEmployee.pay_rate))
+                        hours = Decimal(str(line["hours"]))
+
                         amount = payRate * hours
+                        amount = amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
                         # Match people
                         try:
@@ -1510,6 +1512,18 @@ def clockifyImportPayroll(request, *args, **kwargs):
 
                         # Only used for duplicates
                         line.pop("startTime", None)
+
+                        if "pay_amount" in line and line["pay_amount"] is not None:
+                            line["pay_amount"] = Decimal(str(line["pay_amount"])).quantize(
+                                Decimal("0.01"),
+                                rounding=ROUND_HALF_UP
+                            )
+
+                        if "hours" in line and line["hours"] is not None:
+                            line["hours"] = Decimal(str(line["hours"])).quantize(
+                                Decimal("0.01"),
+                                rounding=ROUND_HALF_UP
+    )
 
                         payrollModel.objects.update_or_create(
                             **line,
