@@ -184,6 +184,15 @@ class Fund(models.Model):
         db_table = "Funds"
         verbose_name = "Fund"
 
+        default_permissions = ("add", "change", "delete", "view")
+
+        permissions = [
+            ("approve_fund", "Can approve fund"),
+            ("lock_fund", "Can lock fund"),
+            ("edit_fund_budget", "Can edit fund budget"),
+            ("view_fund_reports", "Can view fund reports"),
+    ]
+
 
 class Line(models.Model):
     line_id = models.CharField(primary_key=True, max_length=20, verbose_name="Line ID")
@@ -295,6 +304,14 @@ class Line(models.Model):
         db_table = "Lines"
         verbose_name = "Line"
 
+        default_permissions = ("add", "change", "delete", "view")
+
+        permissions = [
+            ("manage_lines", "Can manage lines"),
+            ("approve_line_budget", "Can approve line budgets"),
+            ("view_line_reports", "Can view line reports"),
+    ]
+
 
 class Item(models.Model):
     item_id = models.AutoField(primary_key=True, verbose_name="Item ID")
@@ -330,6 +347,12 @@ class Item(models.Model):
         db_table = "Items"
         verbose_name = "Item"
 
+        default_permissions = ("add", "change", "delete", "view")
+
+        permissions = [
+        ("manage_items", "Can manage items"),
+        ("view_item_reports", "Can view item reports"),
+    ]
 
 class Employee(models.Model):
     employee_id = models.IntegerField(primary_key=True, verbose_name="Employee ID")
@@ -396,6 +419,13 @@ class Employee(models.Model):
         db_table = "Employees"
         verbose_name = "Employees"
 
+        default_permissions = ("add", "change", "delete", "view")
+
+        permissions = [
+            ("manage_employees", "Can manage employees"),
+            ("view_employee_sensitive_data", "Can view employee sensitive data"),
+            ("manage_employee_pay", "Can manage employee pay"),
+    ]
 
 class People(models.Model):
     people_id = models.AutoField(primary_key=True, verbose_name="Customer/Vendor")
@@ -422,7 +452,12 @@ class People(models.Model):
         db_table = "Peoples"
         verbose_name = "People"
 
+        default_permissions = ("add", "change", "delete", "view")
 
+        permissions = [
+            ("manage_people", "Can manage people"),
+            ("view_vendor_customer_reports", "Can view vendor/customer reports"),
+    ]
 """
 class Invoice(models.Model):
     invoice_number = models.AutoField(primary_key=True, verbose_name="Invoice Number")
@@ -501,6 +536,13 @@ class ActivityList(models.Model):
         db_table = "Activity List"
         verbose_name = "Activity List"
 
+        default_permissions = ("add", "change", "delete", "view")
+
+        permissions = [
+            ("manage_activity_lists", "Can manage activity lists"),
+            ("view_activity_reports", "Can view activity reports"),
+    ]
+
 
 class PayPeriod(models.Model):
     payperiod_id = models.CharField(
@@ -525,6 +567,11 @@ class PayPeriod(models.Model):
         db_table = "PayPeriod"
         verbose_name = "Pay Period"
 
+        default_permissions = ("add", "change", "delete", "view")
+
+        permissions = [
+            ("manage_pay_periods", "Can manage pay periods"),
+    ]
 
 class Payroll(models.Model):
     id = models.BigAutoField(primary_key=True)
@@ -564,6 +611,14 @@ class Payroll(models.Model):
         ordering = ["beg_date"]
         db_table = "Payroll"
         verbose_name = "Payroll"
+
+        default_permissions = ("add", "change", "delete", "view")
+
+        permissions = [
+            ("process_payroll", "Can process payroll"),
+            ("approve_payroll", "Can approve payroll"),
+            ("view_payroll_reports", "Can view payroll reports"),
+    ]
 
 
 class Grant(models.Model):
@@ -615,6 +670,13 @@ class Grant(models.Model):
         db_table = "Grants"
         verbose_name = "Grant"
 
+        default_permissions = ("add", "change", "delete", "view")
+
+        permissions = [
+            ("manage_grants", "Can manage grants"),
+            ("approve_grants", "Can approve grants"),
+            ("view_grant_reports", "Can view grant reports"),
+    ]
 
 class GrantLine(models.Model):
     grantline_id = models.AutoField(primary_key=True, verbose_name="Line ID")
@@ -697,6 +759,13 @@ class GrantLine(models.Model):
         db_table = "Grant Lines"
         verbose_name = "Grant Line"
 
+        default_permissions = ("add", "change", "delete", "view")
+
+        permissions = [
+            ("manage_grant_lines", "Can manage grant lines"),
+            ("approve_grant_line_budget", "Can approve grant line budgets"),
+    ]
+
 
 # Have a table made but dont use it right now
 
@@ -728,6 +797,13 @@ class BudgetActions(models.Model):
         db_table = "Budget Actions"
         verbose_name = "Budget Actions"
 
+        default_permissions = ("add", "change", "delete", "view")
+
+        permissions = [
+            ("approve_budget_actions", "Can approve budget actions"),
+            ("manage_budget_actions", "Can manage budget actions"),
+    ]
+
 
 class Carryover(models.Model):
     co_id = models.AutoField(primary_key=True, verbose_name="Carryover ID")
@@ -757,6 +833,12 @@ class Carryover(models.Model):
         db_table = "Carryover"
         verbose_name = "Carryover"
 
+        default_permissions = ("add", "change", "delete", "view")
+
+        permissions = [
+            ("manage_carryover", "Can manage carryover"),
+            ("view_carryover_reports", "Can view carryover reports"),
+    ]
 
 class HealthInsurance(models.TextChoices):
     single = "Single"
@@ -836,6 +918,14 @@ class Revenue(models.Model):
         db_table = "Revenue"
         verbose_name = "Revenue"
 
+        default_permissions = ("add", "change", "delete", "view")
+
+        permissions = [
+            ("manage_revenue", "Can manage revenue"),
+            ("approve_revenue", "Can approve revenue"),
+            ("view_revenue_reports", "Can view revenue reports"),
+    ]
+
 
 class Expense(models.Model):
     item = models.ForeignKey(Item, on_delete=models.CASCADE, verbose_name="Item")
@@ -911,6 +1001,13 @@ class Expense(models.Model):
         db_table = "Expense"
         verbose_name = "Expense"
 
+        default_permissions = ("add", "change", "delete", "view")
+
+        permissions = [
+            ("manage_expenses", "Can manage expenses"),
+            ("approve_expenses", "Can approve expenses"),
+            ("view_expense_reports", "Can view expense reports"),
+    ]
 
 class AccessControl(models.Model):
     title = models.CharField(max_length=100)
@@ -949,3 +1046,9 @@ class Testing(models.Model):
     class Meta:
         ordering = ["testing_name"]
         db_table = "Testing"
+
+        default_permissions = ("add", "change", "delete", "view")
+
+        permissions = [
+            ("manage_testing", "Can manage testing"),
+    ]

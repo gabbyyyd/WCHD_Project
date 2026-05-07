@@ -12,7 +12,7 @@ from django.apps import apps
 from django.db.models import DecimalField, AutoField
 from django.db import models, transaction
 from django.contrib.auth import authenticate, login
-from django.contrib.auth.decorators import permission_required
+from django.contrib.auth.decorators import permission_required, login_required
 from django.contrib import messages
 from reportlab.lib.pagesizes import letter, landscape
 from reportlab.lib import colors
@@ -43,6 +43,7 @@ from decimal import ROUND_HALF_UP
 from collections import defaultdict
 import calendar
 from datetime import date
+from django.core.exceptions import PermissionDenied
 
 
 
@@ -394,7 +395,13 @@ def viewTableSelect(request):
     return render(request, "WCHDApp/viewTableSelect.html", {'form': form})
 
 #This function decides what data we use in our tables in tableView.html
+@login_required
 def tableView(request, tableName):
+
+    permission_name = f'WCHDApp.view_{tableName.lower()}'
+
+    if not request.user.has_perm(permission_name):
+        raise PermissionDenied
 
     #Grabbing the model selected in viewTableSelect
     model = apps.get_model('WCHDApp', tableName)
@@ -478,7 +485,13 @@ def tableView(request, tableName):
 #New system to dynamically create forms based of model
 #Default way of creating objects dynamically based on table name
 #Some have overrides as stated above
+@login_required
 def createEntry(request, tableName):
+
+    permission_name = f'WCHDApp.add_{tableName.lower()}'
+
+    if not request.user.has_perm(permission_name):
+        raise PermissionDenied
     message = ""
     #Grabbing selected model in viewTableSelect
     model = apps.get_model('WCHDApp', tableName)
@@ -506,6 +519,8 @@ def createEntry(request, tableName):
     return render(request, "WCHDApp/createEntry.html", {"form": form, "tableName": tableName, "message": message})
 
 #Default import logic, payroll has its own logic and is redirect to its own view
+@login_required
+@permission_required('WCHDApp.manage_imports', raise_exception=True)
 def imports(request):
     message = ""
     if request.method == 'POST':
@@ -594,6 +609,8 @@ def imports(request):
     
     return render(request, "WCHDApp/imports.html", {"form": form, "message": message})
 
+@login_required
+@permission_required('WCHDApp.manage_exports', raise_exception=True)
 def exports(request):
 
     message = ""
@@ -969,6 +986,8 @@ def lineView(request):
     }
     return render(request, "WCHDApp/lineView.html", context)
 
+@login_required
+@permission_required('WCHDApp.change_line', raise_exception=True)
 def lineTableUpdate(request):
     message = ""
     fundID = request.GET.get("fund")
@@ -1050,6 +1069,8 @@ def itemView(request):
     }
     return render(request, "WCHDApp/itemView.html", context)
 
+@login_required
+@permission_required('WCHDApp.change_item', raise_exception=True)
 def itemTableUpdate(request):
     message = ""
     lineID = request.GET.get("line")
@@ -1266,6 +1287,8 @@ def checkPrivileges(request):
 def noPrivileges(request, exception):
     return render(request, "WCHDApp/noPrivileges.html")
 
+@login_required
+@permission_required('WCHDApp.process_payroll', raise_exception=True)
 def clockifyImportPayroll(request, *args, **kwargs):
     message = ""
 
