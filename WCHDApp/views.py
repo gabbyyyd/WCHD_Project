@@ -203,8 +203,8 @@ def generate_pdf(request, tableName):
 
 
     elements.append(Spacer(1, 12))
-    elements.append(Paragraph("<b>Total Active Grants:</b> $571,880.00", styles["Normal"]))
-    elements.append(Paragraph("<b>Total Amount for Project:</b> $19,144.00", styles["Normal"]))
+    elements.append(Paragraph("340 Muskingum Drive, Suite B, Marietta, OH 45750", styles["Normal"]))
+    elements.append(Paragraph("740.374.2782 www.washingtongov.org/health", styles["Normal"]))
 
     # Build PDF
     doc.build(elements)

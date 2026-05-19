@@ -880,9 +880,9 @@ class Revenue(models.Model):
     )
     line = models.ForeignKey(Line, on_delete=models.PROTECT, verbose_name="Line")
     # odhafr = models.CharField(max_length=50, verbose_name="ODH AFR")
-    employee = models.ForeignKey(
-        Employee, on_delete=models.PROTECT, verbose_name="Employee"
-    )
+    #employee = models.ForeignKey(
+        #Employee, on_delete=models.PROTECT, verbose_name="Employee"
+    #)
     grantLine = models.ForeignKey(
         GrantLine,
         on_delete=models.PROTECT,
@@ -918,13 +918,13 @@ class Revenue(models.Model):
         db_table = "Revenue"
         verbose_name = "Revenue"
 
-        default_permissions = ("add", "change", "delete", "view")
+        #default_permissions = ("add", "change", "delete", "view")
 
-        permissions = [
-            ("manage_revenue", "Can manage revenue"),
-            ("approve_revenue", "Can approve revenue"),
-            ("view_revenue_reports", "Can view revenue reports"),
-    ]
+        #permissions = [
+            #("manage_revenue", "Can manage revenue"),
+            #("approve_revenue", "Can approve revenue"),
+            #("view_revenue_reports", "Can view revenue reports"),
+    #]
 
 
 class Expense(models.Model):
