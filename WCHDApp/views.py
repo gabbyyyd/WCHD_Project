@@ -943,17 +943,6 @@ def transactionsView(request):
     itemID = request.GET.get('itemSelect')
     sort_by = request.GET.get('sort_by')
     revenueValues = revenueModel.objects.filter(item_id=itemID)
-    accumulator = 0
-    for r in revenueValues:
-        accumulator += r.amount
-
-    #Getting just field names from model
-    fields = revenueModel._meta.get_fields()
-
-    #Lists to sort fields for styling
-    fieldNames = []
-    decimalFields = []
-    aliasNames = []
 
     #Filter for sorting by date range
     start_date = request.GET.get('start_date')
@@ -971,6 +960,18 @@ def transactionsView(request):
     if sort_by:
         revenueValues = revenueValues.order_by(sort_by)
 
+    accumulator = 0
+    for r in revenueValues:
+        accumulator += r.amount
+
+    #Getting just field names from model
+    fields = revenueModel._meta.get_fields()
+
+    #Lists to sort fields for styling
+    fieldNames = []
+    decimalFields = []
+    aliasNames = []
+   
     #Fields that should be accumulated
     summedFields = {
         "Fund": "fund_cash_balance", 
@@ -1100,6 +1101,31 @@ def transactionsExpenseTableUpdate(request):
     #print(itemID)
     expenseModel = apps.get_model('WCHDApp', "expense")
     expenseValues = expenseModel.objects.filter(item_id=itemID)
+
+    start_date = request.GET.get("start_date")
+    end_date = request.GET.get("end_date")
+    sort_by = request.GET.get("sort_by")
+
+    if start_date and end_date:
+        expenseValues = expenseValues.filter(date__range=[start_date, end_date])
+    elif start_date:
+        expenseValues = expenseValues.filter(date__gte=start_date)
+    elif end_date:
+        expenseValues = expenseValues.filter(date__lte=end_date)
+
+    allowedSorts = [
+        "date", "-date",
+        "amount", "-amount",
+        "item", "-item",
+        "people", "-people",
+        "employee", "-employee",
+    ]
+
+    if sort_by in allowedSorts:
+        expenseValues = expenseValues.order_by(sort_by)
+    else:
+        expenseValues = expenseValues.order_by("date")
+
     accumulator = 0
     for e in expenseValues:
         accumulator += e.amount

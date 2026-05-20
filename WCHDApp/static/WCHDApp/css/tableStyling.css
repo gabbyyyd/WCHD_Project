@@ -1,6 +1,6 @@
 .table-container {
-    max-height: 200px;
-    overflow-y: auto;
+    max-height: none;
+    overflow-y: visible;
     overflow-x: auto;
     border: 1px solid #ddd;
 

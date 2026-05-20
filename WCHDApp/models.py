@@ -8,6 +8,7 @@ from decimal import Decimal
 from django.db.models import Sum
 from django.db.models.functions import Coalesce
 from django.db.models import Value
+from datetime import date
 
 
 class FundSource(models.TextChoices):
@@ -872,7 +873,7 @@ class paymentType(models.TextChoices):
 
 class Revenue(models.Model):
     item = models.ForeignKey(Item, on_delete=models.CASCADE, verbose_name="Item")
-    date = models.DateField(auto_now_add=True, verbose_name="Date")
+    date = models.DateField(default=timezone.now, verbose_name="Date")
     people = models.ForeignKey(People, on_delete=models.PROTECT, verbose_name="People")
     amount = models.DecimalField(max_digits=20, decimal_places=2, verbose_name="Amount")
     payType = models.CharField(
