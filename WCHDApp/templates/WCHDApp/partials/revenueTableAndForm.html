@@ -55,8 +55,12 @@
                         </td>
                         
                         {% for field in fields %}
-                            {% if field in decimalFields %}
+                            {% if field == "payType" %}
+                                <td>{{ row.get_payType_display }}</td>
+
+                            {% elif field in decimalFields %}
                                 <td style="text-align: right;">{{ row|get_attr:field }}</td>
+
                             {% else %}
                                 <td>{{ row|get_attr:field }}</td>
                             {% endif %}

@@ -51,7 +51,8 @@ urlpatterns = [
     path('insurancePercentageView/', views.insurancePercentageView, name='insurancePercentageView'),
     path('insurancePercentageTableUpdate/', views.insurancePercentageTableUpdate, name='insurancePercentageTableUpdate'),
     path("insuranceReports/", views.insuranceReports, name="insuranceReports"),
-    path("insuranceReportsPDF/<int:year>/<int:month>/<str:report_type>/", views.insuranceReportsPDF, name="insuranceReportsPDF"),
+    path("insuranceReportsPDF/<int:year>/<int:month>/<str:report_type>/<str:insurance_type>/", views.insuranceReportsPDF, name="insuranceReportsPDF"),
+    path("admin-log-download/", views.downloadAdminLog, name="downloadAdminLog"),
     ]
 
     

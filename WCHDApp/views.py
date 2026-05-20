@@ -47,7 +47,11 @@ from collections import defaultdict
 import calendar
 from datetime import date
 from django.core.exceptions import PermissionDenied
-
+from django.core.exceptions import ObjectDoesNotExist
+import traceback
+from django.contrib.admin.models import LogEntry
+import csv
+from django.contrib.admin.views.decorators import staff_member_required
 
 
 def generate_pdf(request, tableName):
@@ -519,96 +523,282 @@ def createEntry(request, tableName):
             form = modelform_factory(model, fields="__all__")()
     return render(request, "WCHDApp/createEntry.html", {"form": form, "tableName": tableName, "message": message})
 
+
+def renameOldImportColumns(tableName, file):
+    columnMap = {}
+
+    if tableName == "ActivityList":
+        columnMap = {
+            "ActivityList_id": "ActivityList_id",
+            "dept_id": "dept_id",
+            "fund_id": "fund_id",
+            "item_id": "item_id",
+        }
+
+    elif tableName == "Item":
+        columnMap = {
+            "item_id": "item_id",
+            "fund_id": "fund_id",
+            "line_id": "line_id",
+        }
+
+    elif tableName == "Line":
+        columnMap = {
+            "line_id": "line_id",
+            "fund_id": "fund_id",
+            "dept_id": "dept_id",
+        }
+
+    elif tableName == "Fund":
+        columnMap = {
+            "fund_id": "fund_id",
+            "dept_id": "dept_id",
+        }
+
+    elif tableName == "Revenue":
+        columnMap = {
+            "item_id": "item_id",
+            "people_id": "people_id",
+            "ActivityList_id": "ActivityList_id",
+            "line_id": "line_id",
+            "employee_id": "employee_id",
+            "grantLine_id": "grantLine_id",
+        }
+
+    elif tableName == "Expense":
+        columnMap = {
+            "item_id": "item_id",
+            "people_id": "people_id",
+            "ActivityList_id": "ActivityList_id",
+            "line_id": "line_id",
+            "employee_id": "employee_id",
+            "grantLine_id": "grantLine_id",
+        }
+
+    return file.rename(columns=columnMap)
+
 #Default import logic, payroll has its own logic and is redirect to its own view
-@login_required
-@permission_required('WCHDApp.manage_imports', raise_exception=True)
+def cleanImportValue(value):
+    """
+    Cleans values coming from old CSV files.
+    """
+
+    if value is None:
+        return None
+
+    value = str(value).strip()
+
+    if value == "" or value.lower() == "nan":
+        return None
+
+    # Converts values like 56.0 into 56
+    if value.endswith(".0"):
+        value = value[:-2]
+
+    return value
+
+def convertOldImportValue(tableName, column, value):
+    if value is None:
+        return None
+
+    value = str(value).strip()
+
+    # Any column that points to a Fund may have old values like 2026-6000.
+    # The new Fund primary key only wants 6000.
+    fundColumns = [
+        "fund_id",
+        "adminPayFund_id",
+        "specialFund_id",
+    ]
+
+    if column in fundColumns and "-" in value:
+        return value.split("-")[-1]
+
+    return value
+
+def cleanDateValue(value):
+    if value is None:
+        return None
+
+    value = str(value).strip()
+
+    if value == "":
+        return None
+
+    dateFormats = [
+        "%Y-%m-%d",   # 2025-12-29
+        "%m/%d/%Y",   # 12/29/2025
+        "%m/%d/%y",   # 12/29/25
+    ]
+
+    for dateFormat in dateFormats:
+        try:
+            return datetime.strptime(value, dateFormat).date()
+        except ValueError:
+            pass
+
+    return value
+
 def imports(request):
     message = ""
-    if request.method == 'POST':
-        form = InputSelect(request.POST, request.FILES)
-        if form.is_valid():
-            #Pulls data from submitted files
-            tableName = form.cleaned_data['table']
-        if tableName == 'Payroll':
-            return redirect('clockifyImportPayroll')
-        selectedFile = form.cleaned_data['file']
-        if tableName == 'InsurancePercentage':
-            success, message = processInsurancePercentageImport(selectedFile)
-            return render(request, "WCHDApp/imports.html", {"form": form, "message": message})
-        file = pd.read_csv(selectedFile)
-        columns = file.columns
-        row = file.iloc[0]
-        data = []
-        #Grab slected model
-        model = apps.get_model('WCHDApp', tableName)
-        fields = model._meta.get_fields()
 
-        #Define what fields we want to look at from the file and model
-        neededFields = []
-        for field in fields:
-            if field.is_relation:
-                    #fks.append(field.name)
+    if request.method == "POST":
+        form = InputSelect(request.POST, request.FILES)
+
+        if form.is_valid():
+            tableName = form.cleaned_data["table"]
+
+            if tableName == "Payroll":
+                return redirect("clockifyImportPayroll")
+
+            selectedFile = form.cleaned_data["file"]
+
+            if tableName == "InsurancePercentage":
+                success, message = processInsurancePercentageImport(selectedFile)
+                return render(
+                    request,
+                    "WCHDApp/imports.html",
+                    {
+                        "form": form,
+                        "message": message,
+                    }
+                )
+
+            try:
+                # Read every value as text so IDs do not become weird decimals
+                file = pd.read_csv(selectedFile, dtype=str).fillna("")
+                file.columns = [column.strip() for column in file.columns]
+
+                model = apps.get_model("WCHDApp", tableName)
+                modelFields = model._meta.get_fields()
+
+                neededFields = []
+
+                for field in modelFields:
+                    # Skip reverse relationships and Django-created fields
                     if field.auto_created:
                         continue
+
+                    # ForeignKey fields need the actual database column name,
+                    # like fund_id instead of fund
+                    if field.is_relation:
+                        neededFields.append(field.attname)
                     else:
-                        #Grab related model. This is why foreign keys have to be named after the model 
-                        parentModel = apps.get_model('WCHDApp', field.name)
+                        neededFields.append(field.name)
 
-                        #Get the related models primary key
-                        fkName = parentModel._meta.pk.name
-                        neededFields.append(fkName)
-            else:
-                neededFields.append(field.name)
-        if neededFields != list(columns):
-            message = "Bad File. Please check your CSV format and try again."
-            return render(request, "WCHDApp/imports.html", {"form": form, "message": message})
-        lookUpFields = []
-        fks = []
-        #Same logic as above just for lookups and fk
-        for field in fields:
-            #Logic for foreign keys
-            if field.is_relation:
-                fks.append(field.name)
-                if field.auto_created:
-                    continue
-                else:
-                    #Grab related model. This is why foreign keys have to be named after the model 
-                    parentModel = apps.get_model('WCHDApp', field.name)
+                csvColumns = list(file.columns)
 
-                    #Get the related models primary key
-                    fkName = parentModel._meta.pk.name
-                    #fks.append(fkName)
-                    #Primary keys verbose name
-                    fkAlias = parentModel._meta.pk.verbose_name
-            else:
-                lookUpFields.append(field)
-            
-        #Creating a dictionary for each row in the file
-        for i in range(len(file)):
-            dict = {}
-            row = file.iloc[i]
-            for column in columns:
-                dict[column] = row[column]
-            data.append(dict)
-                
-            #For each entry in the dictionary convert types and then create an object based on the dict
-        for line in data:
-            for key in line:
-                if type(line[key]) == np.int64:
-                    line[key] = int(line[key])
-                if key in fks:
-                    parentModel = apps.get_model('WCHDApp', key)
-                    print("Grab the object linked")
-                    line[key] = parentModel.objects.get(pk=line[key])
-            print(line)
-            obj, _ = model.objects.update_or_create(
-                **line,
-                defaults = line
-            )    
+                missingFields = []
+
+                for fieldName in neededFields:
+                    if fieldName not in csvColumns:
+                        missingFields.append(fieldName)
+
+                if missingFields:
+                    message = f"Bad File. Missing columns: {missingFields}"
+                    return render(
+                        request,
+                        "WCHDApp/imports.html",
+                        {
+                            "form": form,
+                            "message": message,
+                        }
+                    )
+
+                importedCount = 0
+                skippedCount = 0
+
+                for i in range(len(file)):
+                    row = file.iloc[i]
+                    line = {}
+
+                    for column in csvColumns:
+                        if column in neededFields:
+                            if tableName == "Employee" and column == "user_id":
+                                continue
+                            cleanedValue = cleanImportValue(row[column])
+                            cleanedValue = convertOldImportValue(tableName, column, cleanedValue)
+
+                            if column in ["date", "dob", "hire_date"]:
+                                cleanedValue = cleanDateValue(cleanedValue)
+
+                            line[column] = cleanedValue
+
+                    pkField = model._meta.pk
+                    pkName = pkField.name
+                    hasAutoPrimaryKey = pkField.auto_created
+
+                    if not hasAutoPrimaryKey:
+                        if pkName not in line:
+                            message = f"Bad File. Missing primary key column: {pkName}"
+                            return render(request, "WCHDApp/imports.html", {"form": form, "message": message})
+
+                        if line[pkName] is None:
+                            skippedCount += 1
+                            continue
+
+                    # Do not pass None into non-nullable fields if the CSV is blank
+                    cleanLine = {}
+
+                    for key, value in line.items():
+
+                        # Special fix for blank grantLine_id values
+                        if key == "grantLine_id" and (value is None or value == ""):
+                            cleanLine[key] = None
+                            continue
+
+                        try:
+                            field = model._meta.get_field(key)
+                        except:
+                            if key.endswith("_id"):
+                                field = model._meta.get_field(key[:-3])
+                            else:
+                                raise
+
+                        if value is None:
+                            if field.null or field.blank:
+                                cleanLine[key] = None
+                            else:
+                                continue
+                        else:
+                            cleanLine[key] = value
+
+                    if hasAutoPrimaryKey:
+                        if pkName in cleanLine:
+                            cleanLine.pop(pkName)
+
+                        obj = model(**cleanLine)
+
+                        # Imported old Revenue/Expense records should not change fund balances again
+                        if tableName in ["Revenue", "Expense"]:
+                            obj._importing_old_data = True
+
+                        obj.save()
+                        importedCount += 1
+
+                message = f"{tableName} imported successfully. Imported: {importedCount}. Skipped: {skippedCount}."
+
+            except ObjectDoesNotExist as e:
+                message = f"Import failed. A related record does not exist: {e}"
+
+            except Exception as e:
+                print(traceback.format_exc())
+                message = f"Import failed: {e}"
+
+        else:
+            message = "Bad form. Please select a table and upload a CSV file."
+
     else:
         form = InputSelect()
-    
-    return render(request, "WCHDApp/imports.html", {"form": form, "message": message})
+
+    return render(
+        request,
+        "WCHDApp/imports.html",
+        {
+            "form": form,
+            "message": message,
+        }
+    )
 
 @login_required
 @permission_required('WCHDApp.manage_exports', raise_exception=True)
@@ -807,24 +997,33 @@ def transactionsView(request):
 
     if request.method == 'POST':
         form = RevenueForm(request.POST)
-        user  = request.user
-        try:
-            employeeModel = apps.get_model('WCHDApp', "employee")
-            employee = employeeModel.objects.get(user=user)
-            form.instance.employee = employee
-        except:
-            message = "No employee with signed in user"
-        form.instance.item = item
-        if form.is_valid():
-            #Create the instance but don't save it yet
-            revenue = form.save()
 
-            message = "Revenue Posted Successfully"
-            form = RevenueForm()
-        else: 
-            errors = form.errors
-            if errors.get("grantLine"):
-                message = errors["grantLine"][0] 
+        employeeModel = apps.get_model('WCHDApp', "employee")
+        employee = employeeModel.objects.filter(user=request.user).first()
+
+        if not employee:
+            message = "No employee with signed in user"
+
+        else:
+            if form.is_valid():
+                revenue = form.save(commit=False)
+
+                revenue.employee = employee
+                revenue.item = item
+
+                revenue.save()
+
+                message = "Revenue Posted Successfully"
+                form = RevenueForm()
+
+            else:
+                errors = form.errors
+
+                if errors.get("grantLine"):
+                    message = errors["grantLine"][0]
+                else:
+                    message = "Revenue could not be posted. Please check the form."
+
     else:
         form = RevenueForm()
 
@@ -944,7 +1143,7 @@ def transactionsExpenseTableUpdate(request):
         user  = request.user
         try:
             employeeModel = apps.get_model('WCHDApp', "employee")
-            employee = employeeModel.objects.get(user=user)
+            employee = employeeModel.objects.filter(user=request.user).first()
             form.instance.employee = employee
         except:
             message = "No employee with signed in user"
@@ -1035,7 +1234,7 @@ def lineTableUpdate(request):
         #Excluding fields that are automatic in the model side
         form = modelform_factory(Line, exclude=["fund", "fund_year"])(request.POST)
         form.instance.fund = fund
-        form.instance.fund_year = fund.fund_id.split("-")[0]
+        form.instance.fund_year = fund.year
         if form.is_valid():
             line = form.save()
             message = "Line created successfully"
@@ -2521,7 +2720,14 @@ def getInsuranceReportItem(fund):
         fund_year=fund.year
     ).select_related("line").first()
 
-def buildInsuranceByFund(year, month):
+def getInsuranceAmount(row, insuranceType):
+    if insuranceType == "health":
+        return row.health or Decimal("0.00")
+    if insuranceType == "dental":
+        return row.dental or Decimal("0.00")
+    return (row.health or Decimal("0.00")) + (row.dental or Decimal("0.00"))
+
+def buildInsuranceByFund(year, month, insuranceType):
     allocations = InsuranceAllocation.objects.filter(
         year=year,
         month=month
@@ -2539,7 +2745,7 @@ def buildInsuranceByFund(year, month):
     for row in allocations:
         fund = row.fund
         fundId = fund.pk
-        rowTotal = row.health + row.dental
+        rowTotal = getInsuranceAmount(row, insuranceType)
 
         item = getInsuranceReportItem(fund)
         line = item.line if item else None
@@ -2560,7 +2766,7 @@ def buildInsuranceByFund(year, month):
     return list(grouped.values())
 
 
-def buildInsuranceByEmployee(year, month):
+def buildInsuranceByEmployee(year, month, insuranceType):
     allocations = InsuranceAllocation.objects.filter(
         year=year,
         month=month
@@ -2573,7 +2779,7 @@ def buildInsuranceByEmployee(year, month):
     })
 
     for row in allocations:
-        rowTotal = row.health + row.dental
+        rowTotal = getInsuranceAmount(row, insuranceType)
         employeeId = row.employee.pk
 
         grouped[employeeId]["employee"] = str(row.employee)
@@ -2586,7 +2792,7 @@ def buildInsuranceByEmployee(year, month):
     return list(grouped.values())
 
 
-def buildInsuranceForTrena(year, month):
+def buildInsuranceForTrena(year, month, insuranceType):
     allocations = InsuranceAllocation.objects.filter(
         year=year,
         month=month
@@ -2603,7 +2809,7 @@ def buildInsuranceForTrena(year, month):
     for row in allocations:
         fund = row.fund
         fundId = fund.pk
-        rowTotal = row.health + row.dental
+        rowTotal = getInsuranceAmount(row, insuranceType)
 
         item = getInsuranceReportItem(fund)
         line = item.line if item else None
@@ -2649,13 +2855,14 @@ def insuranceReports(request):
         year = int(request.POST.get("year"))
         month = int(request.POST.get("month"))
         reportType = request.POST.get("report_type")
+        insuranceType = request.POST.get("insurance_type")
 
-        return redirect("insuranceReportsPDF", year=year, month=month, report_type=reportType)
+        return redirect("insuranceReportsPDF", year=year, month=month, report_type=reportType, insurance_type=insuranceType)
 
     return render(request, "WCHDApp/insuranceReports.html", context)
 
 @permission_required('WCHDApp.has_full_access', raise_exception=True)
-def insuranceReportsPDF(request, year, month, report_type):
+def insuranceReportsPDF(request, year, month, report_type, insurance_type):
     buffer = BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=landscape(letter))
     elements = []
@@ -2687,13 +2894,23 @@ def insuranceReportsPDF(request, year, month, report_type):
         fontName="Helvetica-Bold"
     )
 
+    if insurance_type not in ["health", "dental", "all"]:
+        insurance_type = "all"
+    if insurance_type == "health":
+        insuranceLabel = "Health Insurance"
+    elif insurance_type == "dental":
+        insuranceLabel = "Dental Insurance"
+    else:
+        insuranceLabel = "Health and Dental Insurance"
+
     elements.append(Spacer(1, 12))
     elements.append(Paragraph("Washington County Health Department", title_style))
-    elements.append(Paragraph(f"Health Department Insurance Breakdown for {month:02d}/{year}", styles["Heading2"]))
+    elements.append(Paragraph(f"{insuranceLabel} for {month:02d}/{year}", styles["Heading2"]))
     elements.append(Spacer(1, 10))
 
+
     if report_type == "fund":
-        reportData = buildInsuranceByFund(year, month)
+        reportData = buildInsuranceByFund(year, month, insurance_type)
 
         for group in reportData:
             elements.append(
@@ -2732,7 +2949,7 @@ def insuranceReportsPDF(request, year, month, report_type):
         filename = f"insurance_by_fund_{year}_{month:02d}.pdf"
 
     elif report_type == "employee":
-        reportData = buildInsuranceByEmployee(year, month)
+        reportData = buildInsuranceByEmployee(year, month, insurance_type)
 
         for group in reportData:
             elements.append(Paragraph(f"<b>{group['employee']}</b>", styles["Normal"]))
@@ -2769,7 +2986,7 @@ def insuranceReportsPDF(request, year, month, report_type):
         filename = f"insurance_by_employee_{year}_{month:02d}.pdf"
 
     else:
-        reportData = buildInsuranceForTrena(year, month)
+        reportData = buildInsuranceForTrena(year, month, insurance_type)
 
         data = [[
             Paragraph("Fund", header_style),
@@ -2796,7 +3013,9 @@ def insuranceReportsPDF(request, year, month, report_type):
         ]))
         elements.append(table)
 
-        filename = f"insurance_for_trena_{year}_{month:02d}.pdf"
+        filename = f"insurance_for_auditor_{year}_{month:02d}.pdf"
+
+        elements.append(Paragraph("340 Muskingum Dr, Suite B, Marietta OH 45750"))
 
     doc.build(elements)
 
@@ -2806,4 +3025,39 @@ def insuranceReportsPDF(request, year, month, report_type):
 
     response = HttpResponse(pdf_data, content_type="application/pdf")
     response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return response
+
+@staff_member_required
+def downloadAdminLog(request):
+    response = HttpResponse(content_type="text/csv")
+    response["Content-Disposition"] = 'attachment; filename="admin_recent_actions.csv"'
+
+    writer = csv.writer(response)
+
+    writer.writerow([
+        "Action Time",
+        "User",
+        "Action",
+        "Model",
+        "Object",
+        "Object ID",
+        "Change Message",
+    ])
+
+    logs = LogEntry.objects.select_related(
+        "user",
+        "content_type"
+    ).order_by("-action_time")
+
+    for log in logs:
+        writer.writerow([
+            log.action_time,
+            log.user.username if log.user else "",
+            log.get_action_flag_display(),
+            log.content_type.model if log.content_type else "",
+            log.object_repr,
+            log.object_id,
+            log.change_message,
+        ])
+
     return response

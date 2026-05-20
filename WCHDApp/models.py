@@ -195,7 +195,7 @@ class Fund(models.Model):
 
 
 class Line(models.Model):
-    line_id = models.CharField(primary_key=True, max_length=20, verbose_name="Line ID")
+    line_id = models.CharField(primary_key=True, max_length=50, verbose_name="Line ID")
     fund = models.ForeignKey(
         Fund, on_delete=models.CASCADE, verbose_name="Fund", related_name="lines"
     )
@@ -282,17 +282,20 @@ class Line(models.Model):
                 )
 
     def save(self, *args, **kwargs):
-        # Check if this is the first time calling save on this object
         creating = self._state.adding
 
         if creating:
-            enteredID = self.line_id
             fundID = self.fund.full_fund_id
-            fullID = f"{fundID}-{enteredID}"
-            self.line_id = fullID
-            self.fund_year = self.fund.full_fund_id.split("-")[0]
+
+            # Only add the fund prefix if it is not already there
+            if not str(self.line_id).startswith(str(fundID)):
+                enteredID = self.line_id
+                self.line_id = f"{fundID}-{enteredID}"
+
+            self.fund_year = self.fund.year
 
         self.full_clean()
+
         with transaction.atomic():
             super().save(*args, **kwargs)
 
@@ -403,7 +406,7 @@ class Employee(models.Model):
         verbose_name="Special Fund",
     )
     user = models.ForeignKey(
-        User, on_delete=models.RESTRICT, verbose_name="User account"
+        User, on_delete=models.RESTRICT, verbose_name="User account", null=True, blank=True,
     )
     # vac_pay_fund = models.ForeignKey(Fund, on_delete=models.PROTECT,related_name="vac_pay_fund")
     # sick_pay_fund = models.ForeignKey(Fund, on_delete=models.PROTECT,related_name="sick_pay_fund")
@@ -860,9 +863,11 @@ class transactionType(models.TextChoices):
 
 
 class paymentType(models.TextChoices):
-    cash = "Cash"
-    card = "Card"
-    check = "Check"
+    cash = "Cash", "Cash"
+    card = "Card", "Card"
+    check = "Check", "Check"
+    electronicTransfer = "Electronic Transfer", "Electronic Transfer"
+    onlinePayment = "Online Payment", "Online Payment"
 
 
 class Revenue(models.Model):
@@ -880,14 +885,14 @@ class Revenue(models.Model):
     )
     line = models.ForeignKey(Line, on_delete=models.PROTECT, verbose_name="Line")
     # odhafr = models.CharField(max_length=50, verbose_name="ODH AFR")
-    #employee = models.ForeignKey(
-        #Employee, on_delete=models.PROTECT, verbose_name="Employee"
-    #)
+    employee = models.ForeignKey(
+        Employee, on_delete=models.PROTECT, verbose_name="Employee", null=True, blank=True
+    )
     grantLine = models.ForeignKey(
         GrantLine,
-        on_delete=models.PROTECT,
-        blank=True,
+        on_delete=models.SET_NULL,
         null=True,
+        blank=True,
         verbose_name="Grant Line",
     )
 
@@ -897,18 +902,24 @@ class Revenue(models.Model):
                 raise ValidationError({"grantLine": "Please select a revenue line"})
 
     def save(self, *args, **kwargs):
-        # Check if this is the first time calling save on this object
         creating = self._state.adding
+        importingOldData = getattr(self, "_importing_old_data", False)
 
         if creating:
             self.line = self.item.line
 
         self.full_clean()
+
         with transaction.atomic():
             fund = self.line.fund
+
             super().save(*args, **kwargs)
-            fund.fund_cash_balance += self.amount
-            fund.save()
+
+            # Only update fund balance for normal new revenue entries.
+            # Do not update it when importing old records.
+            if creating and not importingOldData:
+                fund.fund_cash_balance += self.amount
+                fund.save()
 
     def __str__(self):
         return f"{self.people} - {self.line} - {self.date} - ${self.amount}"
@@ -973,12 +984,14 @@ class Expense(models.Model):
             )
 
     def save(self, *args, **kwargs):
-        # Check if this is the first time calling save on this object
         creating = self._state.adding
+        importingOldData = getattr(self, "_importing_old_data", False)
 
         if creating:
             self.line = self.item.line
+
             print(f"Full ID: {self.expenseFullID}")
+
             if self.expenseFullID == "":
                 timeNow = datetime.now().time()
                 timeNow = timeNow.strftime("%H:%M")
@@ -986,12 +999,21 @@ class Expense(models.Model):
                 fullID = f"{self.employee.employee_id}-{self.ActivityList.ActivityList_id}-{date.isoformat()}-{timeNow}"
                 self.expenseFullID = fullID
 
-        self.full_clean()
+        # Normal website expenses should be validated.
+        # Old imported expenses should not be blocked by current fund cash balance.
+        if not importingOldData:
+            self.full_clean()
+
         with transaction.atomic():
             fund = self.line.fund
+
             super().save(*args, **kwargs)
-            fund.fund_cash_balance -= self.amount
-            fund.save()
+
+            # Normal website expenses should subtract from fund cash balance.
+            # Old imported expenses should NOT subtract again.
+            if creating and not importingOldData:
+                fund.fund_cash_balance -= self.amount
+                fund.save()
 
     def __str__(self):
         return f"{self.people} - {self.line} - {self.date} - ${self.amount}"
