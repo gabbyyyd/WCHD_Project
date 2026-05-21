@@ -57,12 +57,18 @@ from django.contrib.admin.views.decorators import staff_member_required
 def generate_pdf(request, tableName):
     buffer = BytesIO()
 
-    # Create PDF document
-    doc = SimpleDocTemplate(buffer, pagesize=landscape(letter))
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=landscape(letter),
+        rightMargin=20,
+        leftMargin=20,
+        topMargin=25,
+        bottomMargin=25,
+    )
+
     elements = []
     styles = getSampleStyleSheet()
 
-    # Title Styles
     title_style = ParagraphStyle(
         "TitleStyle",
         parent=styles["Title"],
@@ -71,154 +77,193 @@ def generate_pdf(request, tableName):
         fontName="Helvetica-Bold"
     )
 
-    subtitle_style = ParagraphStyle(
-        "SubtitleStyle",
-        parent=styles["Normal"],
-        fontSize=8,
-        textColor=colors.black,
-        spaceAfter=6,
-        fontName="Helvetica-Oblique"
-    )
-
     table_text_style = ParagraphStyle(
         "TableText",
         parent=styles["Normal"],
-        fontSize=7,          # smaller font
-        leading=8,           # tighter line spacing
-        wordWrap='CJK',      # forces wrapping even on long words
-        alignment=0          # LEFT align (important for readability)
+        fontSize=7,
+        leading=9,
+        wordWrap="CJK",
+        alignment=0,
     )
-    
+
     header_style = ParagraphStyle(
         "HeaderStyle",
         parent=styles["Normal"],
-        fontSize=6,
+        fontSize=7,
         leading=8,
-        alignment=1,  # center
-        fontName="Helvetica-Bold"
+        alignment=1,
+        fontName="Helvetica-Bold",
+        wordWrap="CJK",
     )
-
 
     elements.append(Spacer(1, 12))
     elements.append(Paragraph("Washington County Health Department", title_style))
     elements.append(Spacer(1, 12))
 
+    model = apps.get_model("WCHDApp", tableName)
+    selected_ids = request.GET.getlist("selected_rows")
 
-    model = apps.get_model('WCHDApp', tableName)
-    selected_ids = request.GET.getlist('selected_rows')
+    queryset = model.objects.all()
 
-    # If Revenue, use select_related to get FK objects
+    # Load related objects so foreign keys display as names instead of IDs
     if tableName.lower() == "revenue":
-        queryset = model.objects.select_related("grantLine")
-    else:
-        queryset = model.objects.all()
+        queryset = queryset.select_related(
+            "item",
+            "people",
+            "ActivityList",
+            "employee",
+            "line",
+            "grantLine",
+        )
 
-    # Apply filter if rows were selected
+    elif tableName.lower() == "expense":
+        queryset = queryset.select_related(
+            "item",
+            "people",
+            "ActivityList",
+            "employee",
+            "line",
+            "grantLine",
+        )
+
     if selected_ids:
         queryset = queryset.filter(id__in=selected_ids)
 
-    values = queryset
-
     fields = model._meta.get_fields()
+
     fieldNames = []
     aliasNames = []
 
+    fieldsToSkip = [
+        "line",
+        "line_id",
+        "grantLine",
+        "grantLine_id",
+    ]
+
     for field in fields:
-        # Skip auto-created reverse relations
+        # Skip reverse relationships
         if field.is_relation and field.auto_created:
             continue
 
-        # ForeignKey: store as _id for access
+        # Skip line and grant line columns
+        if field.name in fieldsToSkip:
+            continue
+
         if field.is_relation:
             aliasNames.append(field.verbose_name)
-            fieldNames.append(field.name + "_id")  # Django stores FK as fieldname_id
+            fieldNames.append(field.name)
         else:
             aliasNames.append(field.verbose_name)
             fieldNames.append(field.name)
-        
-    id_index = aliasNames.index("id") if "id" in aliasNames else None
-    payment_index = aliasNames.index("payment type") if "payment type" in aliasNames else None
-    comment_index = aliasNames.index("comment") if "comment" in aliasNames else None
 
+    data = [[Paragraph(str(name).title(), header_style) for name in aliasNames]]
 
-
-    data = [[Paragraph(str(name), header_style) for name in aliasNames]]
-    
-    for row in values:
+    for row in queryset:
         line = []
 
-        for field in fieldNames:
-            if field.endswith("_id") and hasattr(row, field.replace("_id", "")):
-                related_obj = getattr(row, field.replace("_id", ""), None)
-                text = str(related_obj) if related_obj else ""
+        for fieldName in fieldNames:
+            value = getattr(row, fieldName, "")
+
+            # If field has choices, show the readable display value
+            fieldObject = model._meta.get_field(fieldName)
+
+            if fieldObject.choices:
+                displayMethod = f"get_{fieldName}_display"
+                text = getattr(row, displayMethod)()
+
+            # If foreign key, show the related object's string name
+            elif fieldObject.is_relation:
+                text = str(value) if value else ""
+
             else:
-                if isinstance(row, dict):
-                    text = str(row.get(field, ""))
-                else:
-                    text = str(getattr(row, field, ""))
+                text = str(value) if value is not None else ""
 
             line.append(Paragraph(text, table_text_style))
 
         data.append(line)
 
-
-
     col_count = max(len(r) for r in data)
-    usable_width = 10 * inch
+    usable_width = landscape(letter)[0] - doc.leftMargin - doc.rightMargin
 
-    # Start everything evenly
+    # Default column widths
     col_widths = [usable_width / col_count] * col_count
 
-    # Set specific columns
-    col_widths[0] = 0.35 * inch   # ID (small)
-    col_widths[5] = 0.4 * inch   # Payment Type (small)
-    col_widths[7] = 3.5 * inch   # Comment (large)
+    # Make common long-text columns wider
+    for index, name in enumerate(aliasNames):
+        lowerName = str(name).lower()
 
-    # Rebalance remaining columns
-    fixed_indexes = [0, 5, 7]
-    remaining_width = usable_width - sum(col_widths[i] for i in fixed_indexes)
+        if lowerName in ["id"]:
+            col_widths[index] = 0.75 * inch
 
-    remaining_cols = [i for i in range(col_count) if i not in fixed_indexes]
+        elif "comment" in lowerName:
+            col_widths[index] = 2.5 * inch
 
-    if remaining_cols:
-        even_width = remaining_width / len(remaining_cols)
-        for i in remaining_cols:
-            col_widths[i] = even_width
+        elif "person" in lowerName or "people" in lowerName:
+            col_widths[index] = 1.4 * inch
 
-    table = Table(data, colWidths=col_widths)
+        elif "activity" in lowerName or "program" in lowerName:
+            col_widths[index] = 1.4 * inch
+
+        elif "employee" in lowerName:
+            col_widths[index] = 1.3 * inch
+
+        elif "amount" in lowerName:
+            col_widths[index] = 0.75 * inch
+
+        elif "date" in lowerName:
+            col_widths[index] = 0.8 * inch
+
+    # Rebalance if widths are too wide
+    total_width = sum(col_widths)
+
+    if total_width > usable_width:
+        scale = usable_width / total_width
+        col_widths = [width * scale for width in col_widths]
+
+    table = Table(
+        data,
+        colWidths=col_widths,
+        repeatRows=1,
+        splitByRow=True,
+    )
 
     table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), colors.darkgray),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
         ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("BOTTOMPADDING", (0, 0), (-1, 0), 5),
+
+        ("ALIGN", (0, 0), (-1, 0), "CENTER"),
+        ("ALIGN", (0, 1), (-1, -1), "LEFT"),
+
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+
+        ("BOTTOMPADDING", (0, 0), (-1, 0), 6),
+        ("TOPPADDING", (0, 0), (-1, 0), 6),
+
+        ("TOPPADDING", (0, 1), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 1), (-1, -1), 4),
+        ("LEFTPADDING", (0, 0), (-1, -1), 3),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 3),
+
         ("BACKGROUND", (0, 1), (-1, -1), colors.whitesmoke),
-        ("GRID", (0, 0), (-1, -1), 1, colors.black),
-        ("FONTSIZE", (0, 0), (-1, -1), 8),
-        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-        ("TOPPADDING", (0, 0), (-1, 0), 10),
-        ("LEFTPADDING", (0, 0), (-1, -1), 4),
-        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
-        
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
     ]))
 
     elements.append(table)
-
 
     elements.append(Spacer(1, 12))
     elements.append(Paragraph("340 Muskingum Drive, Suite B, Marietta, OH 45750", styles["Normal"]))
     elements.append(Paragraph("740.374.2782 www.washingtongov.org/health", styles["Normal"]))
 
-    # Build PDF
     doc.build(elements)
 
-    # Return PDF response
     buffer.seek(0)
     pdf_data = buffer.getvalue()
     buffer.close()
-    response = HttpResponse(pdf_data, content_type='application/pdf')
-    response['Content-Disposition'] = f'inline; filename="{tableName}_report.pdf"'
+
+    response = HttpResponse(pdf_data, content_type="application/pdf")
+    response["Content-Disposition"] = f'inline; filename="{tableName}_report.pdf"'
 
     return response
 
@@ -803,42 +848,74 @@ def imports(request):
 @login_required
 @permission_required('WCHDApp.manage_exports', raise_exception=True)
 def exports(request):
-
     message = ""
+
     if request.method == 'POST':
         form = ExportSelect(request.POST)
+
         if form.is_valid():
             tableName = form.cleaned_data['table']
             fileName = form.cleaned_data['fileName']
-            
+
             model = apps.get_model('WCHDApp', tableName)
             queryset = model.objects.all()
+
             start_date = form.cleaned_data['start_date']
             end_date = form.cleaned_data['end_date']
 
-            #If date filtering entered for Revenue or Expense, filter based on date range
+            # If date filtering entered for Revenue or Expense, filter based on date range
             if tableName in ["Revenue", "Expense"]:
                 if start_date:
                     queryset = queryset.filter(date__gte=start_date)
+
                 if end_date:
                     queryset = queryset.filter(date__lte=end_date)
-            data = queryset.values()
-            #data = model.objects.all().values()
-            exportData = pd.DataFrame.from_records(data)
 
+            exportRows = []
 
-            #From what I read the 2 commented lines are how we can show it in a new tab before download
-            #However, its raw text apparently browsers dont like not immediately downloading csv, could be useful for our reports though
+            fields = model._meta.fields
+
+            for obj in queryset:
+                row = {}
+
+                for field in fields:
+                    fieldName = field.name
+                    verboseName = field.verbose_name
+
+                    value = getattr(obj, fieldName)
+
+                    # If this field has choices, export the display value
+                    if field.choices:
+                        displayMethod = f"get_{fieldName}_display"
+                        value = getattr(obj, displayMethod)()
+
+                    # If this is a foreign key, export the object's string value instead of the ID
+                    elif field.is_relation:
+                        if value is not None:
+                            value = str(value)
+                        else:
+                            value = ""
+
+                    # Otherwise, export the normal value
+                    else:
+                        if value is None:
+                            value = ""
+
+                    row[verboseName] = value
+
+                exportRows.append(row)
+
+            exportData = pd.DataFrame(exportRows)
+
             response = HttpResponse(content_type='text/csv')
-            #response = HttpResponse(content_type='text/text')
-            #response['Content-Disposition'] = f'inline; filename="{fileName}.csv"'
             response['Content-Disposition'] = f'attachment; filename="{fileName}.csv"'
 
             exportData.to_csv(path_or_buf=response, index=False)
             return response
+
     else:
         form = ExportSelect()
-        
+
     return render(request, "WCHDApp/exports.html", {"form": form, "message": message})
 
 def countyPayrollExport(request):
