@@ -1051,6 +1051,7 @@ def transactionsView(request):
     #Filter for sorting by date range
     start_date = request.GET.get('start_date')
     end_date = request.GET.get('end_date')
+    sort_by = request.GET.get("sort_by")
 
     if start_date and end_date:
         revenueValues = revenueValues.filter(date__range=[start_date, end_date])
