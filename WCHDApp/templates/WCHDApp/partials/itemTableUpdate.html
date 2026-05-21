@@ -65,5 +65,11 @@
     console.log("Running")
     $(document).ready(function() {
         $('.searchable-select').select2();
-    });
+        
+                // Sort table alphabetically by first column
+        const table = document.getElementById("item-table").tBodies[0];
+        Array.from(table.rows)
+            .sort((a, b) => a.cells[0].textContent.localeCompare(b.cells[0]))
+            .forEach(row => table.appendChild(row));
+        });
 </script>

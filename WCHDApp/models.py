@@ -1,9 +1,14 @@
 from django.db import models, transaction
-from djmoney.models.fields import MoneyField
+#from djmoney.models.fields import MoneyField
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from datetime import datetime
 from django.utils import timezone
+from decimal import Decimal
+from django.db.models import Sum
+from django.db.models.functions import Coalesce
+from django.db.models import Value
+from datetime import date
 
 
 class FundSource(models.TextChoices):
@@ -11,17 +16,65 @@ class FundSource(models.TextChoices):
     STATE = "STATE"
     LOCAL = "LOCAL"
 
+# used to be called Variable
+class InsuranceAssignment(models.Model):
+    employee = models.ForeignKey("Employee", on_delete=models.CASCADE, null=True, blank=True)
+    year = models.PositiveSmallIntegerField()
 
-class Variable(models.Model):
-    name = models.CharField(max_length=50)
-    value = models.DecimalField(max_digits=10, decimal_places=2)
+    health_type = models.CharField(max_length=50, blank=True)
+    health_rate = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+
+    dental_type = models.CharField(max_length=50, blank=True)
+    dental_rate = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+
+    life_type = models.CharField(max_length=50, blank=True)
+    life_rate = models.DecimalField(max_digits=10, decimal_places=2, default=0)
 
     def __str__(self):
-        return self.name
+        return f"{self.employee} - {self.year}"
 
     class Meta:
-        db_table = "Variables"
+        ordering = ["year", "employee"]
+        db_table = "Insurance Rate"
+        verbose_name = "Insurance Assignment"
+        verbose_name_plural = "Insurance Assignments"
+        unique_together = ("employee", "year")
 
+class InsurancePercentage(models.Model):
+    employee = models.ForeignKey("Employee", on_delete=models.CASCADE, null=True, blank=True)
+    fund = models.ForeignKey("Fund", on_delete=models.CASCADE)
+    start_date = models.DateField(null=True, blank=True)
+    end_date = models.DateField(null=True, blank=True)
+    percent_of_time = models.DecimalField(max_digits=6, decimal_places=2)
+
+    def __str__(self):
+        return f"{self.employee} - {self.fund} - {self.start_date} to {self.end_date}"
+
+    class Meta:
+        ordering = ["start_date", "end_date", "employee", "fund"]
+        db_table = "Insurance Percentage"
+        verbose_name = "Insurance Percentage"
+        verbose_name_plural = "Insurance Percentages"
+
+class InsuranceAllocation(models.Model):
+    year = models.IntegerField(verbose_name="Year")
+    month = models.IntegerField(verbose_name="Month")
+    employee = models.ForeignKey("Employee", on_delete=models.CASCADE, verbose_name="Employee", null=True, blank=True)
+    fund = models.ForeignKey("Fund", on_delete=models.CASCADE, verbose_name="Fund")
+    percent_of_time = models.DecimalField(max_digits=6, decimal_places=2, verbose_name="Percent Of Time", default=0)
+    health = models.DecimalField(max_digits=10, decimal_places=2, verbose_name="Health", default=0)
+    dental = models.DecimalField(max_digits=10, decimal_places=2, verbose_name="Dental", default=0)
+    life = models.DecimalField(max_digits=10, decimal_places=2, verbose_name="Life", default=0)
+
+    def __str__(self):
+        return f"{self.employee} - {self.fund} - {self.year}-{self.month}"
+
+    class Meta:
+        ordering = ["year", "month", "employee", "fund"]
+        db_table = "Insurance Allocation"
+        verbose_name = "Insurance Allocation"
+        verbose_name_plural = "Insurance Allocations"
+        unique_together = ("year", "month", "employee", "fund")
 
 # REMINDER TO TAKE OUT null=True and blank=True from all instances of dept once we have a department populated
 class Dept(models.Model):
@@ -33,77 +86,90 @@ class Dept(models.Model):
 
     class Meta:
         db_table = "Departments"
+        verbose_name = "Dept"
 
 
 class Fund(models.Model):
     SOFChoices = [("local", "Local"), ("state", "State"), ("federal", "Federal")]
-    fund_id = models.CharField(max_length=20, primary_key=True, verbose_name="Fund ID")
+
+    fund_id = models.SmallIntegerField(primary_key=True, verbose_name="Fund ID")
     fund_name = models.CharField(max_length=255, blank=False, verbose_name="Fund Name")
-    year = models.IntegerField(blank=False, verbose_name="Year")
+    year = models.IntegerField(blank=True, verbose_name="Year", null = True)
     fund_cash_balance = models.DecimalField(
         max_digits=15, decimal_places=2, verbose_name="Cash Balance"
     )
-    fund_total = models.DecimalField(
-        max_digits=15, decimal_places=2, verbose_name="Total Given"
-    )
-    # fund_budgeted = models.DecimalField(max_digits=15, decimal_places=2, verbose_name="Budgeted")
+    
     dept = models.ForeignKey(
         Dept, on_delete=models.CASCADE, null=True, blank=True, verbose_name="Department"
     )
-    sof = models.CharField(
-        max_length=10, blank=False, choices=FundSource.choices, verbose_name="SoF"
-    )
-    # mac_elig = models.BooleanField(blank=False, verbose_name="MACE")
+    
 
     @property
-    def calcRemaining(self):
-        lines = self.lines.filter(lineType="Expense")
-        total = 0
-        for line in lines:
-            total += float(line.budgetSpent)
-        remaining = float(self.budgeted) - total
-        return f"{remaining:.2f}"
+    def full_fund_id(self):
+        return f"{self.year}-{self.fund_id}"
 
     @property
     def budgeted(self):
-        lines = self.lines.filter(fund__fund_id=self.fund_id)
-        total = 0
-        for line in lines:
-            total += float(line.line_budgeted)
+        total = self.lines.filter(lineType="Expense").aggregate(
+            s=Coalesce(Sum("line_budgeted"), Value(Decimal("0.00")))
+        )["s"]
+        return total
 
-        return f"{total:.2f}"
+    @property
+    def calcRemaining(self):
+        spent = Decimal("0.00")
+        for line in self.lines.filter(lineType="Expense"):
+            spent += Decimal(str(line.budgetSpent or 0))
+        return self.budgeted - spent
 
     @property
     def remainingToBudget(self):
-        total = float(self.fund_cash_balance) - float(self.budgeted)
-
-        return f"{total:.2f}"
+        return (self.fund_cash_balance or Decimal("0.00")) - self.budgeted
 
     @property
     def totalAvailable(self):
-        total = float(self.fund_cash_balance)
-        expenseLines = Line.objects.filter(
-            fund__fund_id=self.fund_id, lineType="Expense"
-        )
-        revenueLines = Line.objects.filter(
-            fund__fund_id=self.fund_id, lineType="Revenue"
-        )
+        total = self.fund_cash_balance or Decimal("0.00")
 
-        for line in expenseLines:
-            total -= float(line.line_budgeted)
+        expense_sum = self.lines.filter(lineType="Expense").aggregate(
+            s=Coalesce(Sum("line_budgeted"), Value(Decimal("0.00")))
+        )["s"]
 
-        for line in revenueLines:
-            total += float(line.line_budgeted)
+        revenue_sum = self.lines.filter(lineType="Revenue").aggregate(
+            s=Coalesce(Sum("line_budgeted"), Value(Decimal("0.00")))
+        )["s"]
 
-        return f"{total:.2f}"
+        return total - expense_sum + revenue_sum
+
+    @property
+    def actualRevenue(self):
+        total = Decimal("0.00")
+        for line in self.lines.filter(lineType="Revenue"):
+            total += line.totalIncome
+        return total
+
+    @property
+    def actualExpense(self):
+        total = Decimal("0.00")
+        for line in self.lines.filter(lineType="Expense"):
+            total += line.budgetSpent
+        return total
+
+    @property
+    def budgetedRevenue(self):
+        return self.lines.filter(lineType="Revenue").aggregate(
+            s=Coalesce(Sum("line_budgeted"), Value(Decimal("0.00")))
+        )["s"]
+
+    @property
+    def budgetedExpense(self):
+        return self.lines.filter(lineType="Expense").aggregate(
+            s=Coalesce(Sum("line_budgeted"), Value(Decimal("0.00")))
+        )["s"]
 
     def save(self, *args, **kwargs):
-        # Check if this is the first time calling save on this object
         creating = self._state.adding
 
         if creating:
-            fullID = f"{self.year}-{self.fund_id}"
-            self.fund_id = fullID
             self.fund_total = self.fund_cash_balance
 
         self.full_clean()
@@ -111,14 +177,25 @@ class Fund(models.Model):
             super().save(*args, **kwargs)
 
     def __str__(self):
-        return f"({self.fund_id}) {self.fund_name}"
+        return f"({self.full_fund_id}) {self.fund_name}"
 
     class Meta:
+        ordering = ["fund_id", "fund_name"]
         db_table = "Funds"
+        verbose_name = "Fund"
+
+        default_permissions = ("add", "change", "delete", "view")
+
+        permissions = [
+            ("approve_fund", "Can approve fund"),
+            ("lock_fund", "Can lock fund"),
+            ("edit_fund_budget", "Can edit fund budget"),
+            ("view_fund_reports", "Can view fund reports"),
+    ]
 
 
 class Line(models.Model):
-    line_id = models.CharField(primary_key=True, max_length=20, verbose_name="Line ID")
+    line_id = models.CharField(primary_key=True, max_length=50, verbose_name="Line ID")
     fund = models.ForeignKey(
         Fund, on_delete=models.CASCADE, verbose_name="Fund", related_name="lines"
     )
@@ -131,6 +208,7 @@ class Line(models.Model):
     # line_encumbered = models.DecimalField(max_digits=15, decimal_places=2, verbose_name="Encumbered")
     # line_budget_spent = models.DecimalField(max_digits=15, decimal_places=2, verbose_name="Budget Spent", default=0)
     # line_total_income = models.DecimalField(max_digits=15, decimal_places=2, verbose_name="Total Income", default=0)
+    # hi :)
     dept = models.ForeignKey(
         Dept, on_delete=models.CASCADE, null=True, blank=True, verbose_name="Department"
     )
@@ -149,13 +227,16 @@ class Line(models.Model):
         for expense in expenses:
             total += expense.amount
 
-        return f"{total:.2f}"
+        #return f"{total:.2f}"
+        return total
 
     @property
     def budgetRemaining(self):
-        remaining = float(self.line_budgeted) - float(self.budgetSpent)
+        return self.line_budgeted - self.budgetSpent
+        #remaining = float(self.line_budgeted) - float(self.budgetSpent)
 
-        return f"{remaining:.2f}"
+        #return f"{remaining:.2f}"
+
 
     @property
     def totalIncome(self):
@@ -164,7 +245,8 @@ class Line(models.Model):
         for revenue in revenues:
             total += revenue.amount
 
-        return f"{total:.2f}"
+        #return f"{total:.2f}"
+        return total
 
     def clean(self):
         total = self.fund.fund_cash_balance
@@ -200,17 +282,20 @@ class Line(models.Model):
                 )
 
     def save(self, *args, **kwargs):
-        # Check if this is the first time calling save on this object
         creating = self._state.adding
 
         if creating:
-            enteredID = self.line_id
-            fundID = self.fund.fund_id
-            fullID = f"{fundID}-{enteredID}"
-            self.line_id = fullID
-            self.fund_year = self.fund.fund_id.split("-")[0]
+            fundID = self.fund.full_fund_id
+
+            # Only add the fund prefix if it is not already there
+            if not str(self.line_id).startswith(str(fundID)):
+                enteredID = self.line_id
+                self.line_id = f"{fundID}-{enteredID}"
+
+            self.fund_year = self.fund.year
 
         self.full_clean()
+
         with transaction.atomic():
             super().save(*args, **kwargs)
 
@@ -219,13 +304,22 @@ class Line(models.Model):
 
     class Meta:
         db_table = "Lines"
+        verbose_name = "Line"
+
+        default_permissions = ("add", "change", "delete", "view")
+
+        permissions = [
+            ("manage_lines", "Can manage lines"),
+            ("approve_line_budget", "Can approve line budgets"),
+            ("view_line_reports", "Can view line reports"),
+    ]
 
 
 class Item(models.Model):
     item_id = models.AutoField(primary_key=True, verbose_name="Item ID")
     fund = models.ForeignKey(Fund, on_delete=models.CASCADE, verbose_name="Fund")
     fund_type = models.CharField(
-        max_length=50, choices=FundSource.choices, verbose_name="Fund Type"
+        max_length=50, choices=FundSource.choices,blank=True, null=True, verbose_name="Fund Type"
     )
     line = models.ForeignKey(Line, on_delete=models.CASCADE, verbose_name="Line")
     fund_year = models.IntegerField(verbose_name="Fund Year")
@@ -241,7 +335,6 @@ class Item(models.Model):
 
         if creating:
             self.fund = self.line.fund
-            self.fund_type = self.line.fund.sof
             self.fund_year = self.line.fund_year
 
         self.full_clean()
@@ -253,7 +346,14 @@ class Item(models.Model):
 
     class Meta:
         db_table = "Items"
+        verbose_name = "Item"
 
+        default_permissions = ("add", "change", "delete", "view")
+
+        permissions = [
+        ("manage_items", "Can manage items"),
+        ("view_item_reports", "Can view item reports"),
+    ]
 
 class Employee(models.Model):
     employee_id = models.IntegerField(primary_key=True, verbose_name="Employee ID")
@@ -287,13 +387,15 @@ class Employee(models.Model):
         verbose_name="Admin Pay Fund",
     )
     payItem = models.ForeignKey(
-        Item, on_delete=models.PROTECT, related_name="pay_item", verbose_name="Pay Item"
+        Item, on_delete=models.PROTECT, related_name="pay_item", verbose_name="Pay Item", null = True, blank=True,
     )
     specialPayItem = models.ForeignKey(
         Item,
         on_delete=models.PROTECT,
         related_name="special_pay_item",
         verbose_name="Special Pay Item",
+        null = True,
+        blank = True,
     )
     specialFund = models.ForeignKey(
         Fund,
@@ -302,7 +404,7 @@ class Employee(models.Model):
         verbose_name="Special Fund",
     )
     user = models.ForeignKey(
-        User, on_delete=models.RESTRICT, verbose_name="User account"
+        User, on_delete=models.RESTRICT, verbose_name="User account", null=True, blank=True,
     )
     # vac_pay_fund = models.ForeignKey(Fund, on_delete=models.PROTECT,related_name="vac_pay_fund")
     # sick_pay_fund = models.ForeignKey(Fund, on_delete=models.PROTECT,related_name="sick_pay_fund")
@@ -315,17 +417,25 @@ class Employee(models.Model):
 
     class Meta:
         db_table = "Employees"
+        verbose_name = "Employees"
 
+        default_permissions = ("add", "change", "delete", "view")
+
+        permissions = [
+            ("manage_employees", "Can manage employees"),
+            ("view_employee_sensitive_data", "Can view employee sensitive data"),
+            ("manage_employee_pay", "Can manage employee pay"),
+    ]
 
 class People(models.Model):
     people_id = models.AutoField(primary_key=True, verbose_name="Customer/Vendor")
     name = models.CharField(max_length=255, verbose_name="Name")
-    address = models.CharField(max_length=255, verbose_name="Address")
-    city = models.CharField(max_length=100, verbose_name="City")
-    state = models.CharField(max_length=2, verbose_name="State")
-    zip_code = models.CharField(max_length=10, verbose_name="Zip Code")
-    phone = models.CharField(max_length=12, verbose_name="Phone Number")
-    email = models.EmailField(verbose_name="Email")
+    address = models.CharField(max_length=255, blank=True, null=True, verbose_name="Address")
+    city = models.CharField(max_length=100, blank=True, null=True, verbose_name="City")
+    state = models.CharField(max_length=2, blank=True, null=True, verbose_name="State")
+    zip_code = models.CharField(max_length=10, blank=True, null=True, verbose_name="Zip Code")
+    phone = models.CharField(max_length=12, blank=True, null=True, verbose_name="Phone Number")
+    email = models.EmailField( blank=True, null=True,verbose_name="Email")
     primary_contact = models.CharField(
         max_length=255, blank=True, null=True, verbose_name="Primary Contact"
     )
@@ -339,8 +449,14 @@ class People(models.Model):
 
     class Meta:
         db_table = "Peoples"
+        verbose_name = "People"
 
+        default_permissions = ("add", "change", "delete", "view")
 
+        permissions = [
+            ("manage_people", "Can manage people"),
+            ("view_vendor_customer_reports", "Can view vendor/customer reports"),
+    ]
 """
 class Invoice(models.Model):
     invoice_number = models.AutoField(primary_key=True, verbose_name="Invoice Number")
@@ -398,7 +514,7 @@ class ActivityList(models.Model):
     # odhafr = models.CharField(max_length=10, verbose_name="ODHAFR")
     dept = models.ForeignKey(Dept, on_delete=models.CASCADE, verbose_name="Department")
     fund = models.ForeignKey(Fund, on_delete=models.CASCADE, verbose_name="Fund")
-    item = models.ForeignKey(Item, on_delete=models.PROTECT, verbose_name="Item")
+    item = models.ForeignKey(Item, on_delete=models.PROTECT, verbose_name="Item", null=True, blank=True)
     rev_gen = models.BooleanField(default=False, verbose_name="Revenue Generating")
     active = models.BooleanField(default=True, verbose_name="Active")
     fphs = models.CharField(max_length=20, verbose_name="FPHS")
@@ -406,9 +522,9 @@ class ActivityList(models.Model):
     # Field to determine where we take the money from based off employee general pay item, admin pay item, or special pay item
     payType = models.CharField(
         max_length=10,
-        blank=False,
+        blank=True,
         choices=[("general", "General"), ("admin", "Admin"), ("special", "Special")],
-        verbose_name="Pay Type",
+        verbose_name="Pay Type", null=True,
     )
 
     def __str__(self):
@@ -416,6 +532,14 @@ class ActivityList(models.Model):
 
     class Meta:
         db_table = "Activity List"
+        verbose_name = "Activity List"
+
+        default_permissions = ("add", "change", "delete", "view")
+
+        permissions = [
+            ("manage_activity_lists", "Can manage activity lists"),
+            ("view_activity_reports", "Can view activity reports"),
+    ]
 
 
 class PayPeriod(models.Model):
@@ -438,7 +562,13 @@ class PayPeriod(models.Model):
 
     class Meta:
         db_table = "PayPeriod"
+        verbose_name = "Pay Period"
 
+        default_permissions = ("add", "change", "delete", "view")
+
+        permissions = [
+            ("manage_pay_periods", "Can manage pay periods"),
+    ]
 
 class Payroll(models.Model):
     id = models.BigAutoField(primary_key=True)
@@ -449,7 +579,7 @@ class Payroll(models.Model):
         Employee, on_delete=models.CASCADE, verbose_name="Employee"
     )
     ActivityList = models.ForeignKey(
-        ActivityList, on_delete=models.CASCADE, verbose_name="Activity List"
+        ActivityList, on_delete=models.SET_NULL, null=True, blank=True, verbose_name="Activity List"
     )
     # going to get fund from activity list
     # fund = models.ForeignKey(Fund, on_delete=models.CASCADE)
@@ -460,6 +590,28 @@ class Payroll(models.Model):
     payperiod = models.ForeignKey(
         PayPeriod, on_delete=models.PROTECT, verbose_name="Pay Period"
     )
+
+    clockify_project = models.CharField(
+    max_length=100,
+    null=True,
+    blank=True,
+    verbose_name="Clockify Project"
+    )
+
+    paycode = models.CharField(
+        max_length=50,
+        null=True,
+        blank=True,
+        verbose_name="Paycode"
+    )
+
+    clockify_department = models.CharField(
+    max_length=100,
+    null=True,
+    blank=True,
+    verbose_name="Clockify Department"
+    )
+    
     # I think all of these will be properties instead
     # vacation_used = models.DecimalField(max_digits=6, decimal_places=2, verbose_name="Vacation Used")
     # sick_used = models.DecimalField(max_digits=6, decimal_places=2, verbose_name="Sick Used")
@@ -476,6 +628,15 @@ class Payroll(models.Model):
 
     class Meta:
         db_table = "Payroll"
+        verbose_name = "Payroll"
+
+        default_permissions = ("add", "change", "delete", "view")
+
+        permissions = [
+            ("process_payroll", "Can process payroll"),
+            ("approve_payroll", "Can approve payroll"),
+            ("view_payroll_reports", "Can view payroll reports"),
+    ]
 
 
 class Grant(models.Model):
@@ -510,7 +671,7 @@ class Grant(models.Model):
         return totalRemaining
 
     @property
-    def recieved(self):
+    def received(self):
         grantLines = GrantLine.objects.filter(
             grant__grant_id=self.grant_id, lineType="Revenue"
         )
@@ -524,7 +685,15 @@ class Grant(models.Model):
 
     class Meta:
         db_table = "Grants"
+        verbose_name = "Grant"
 
+        default_permissions = ("add", "change", "delete", "view")
+
+        permissions = [
+            ("manage_grants", "Can manage grants"),
+            ("approve_grants", "Can approve grants"),
+            ("view_grant_reports", "Can view grant reports"),
+    ]
 
 class GrantLine(models.Model):
     grantline_id = models.AutoField(primary_key=True, verbose_name="Line ID")
@@ -548,27 +717,23 @@ class GrantLine(models.Model):
 
     @property
     def budgetSpent(self):
-        expenses = Expense.objects.filter(grantLine__grantline_id=self.grantline_id)
-        total = 0
-        for expense in expenses:
-            total += expense.amount
-
-        return f"{total:.2f}"
-
-    @property
-    def budgetRemaining(self):
-        remaining = float(self.line_budgeted) - float(self.budgetSpent)
-
-        return f"{remaining:.2f}"
+        return (
+            Expense.objects
+            .filter(grantLine=self)
+            .aggregate(total=Coalesce(Sum("amount"), Value(Decimal("0.00"))))
+        )["total"]
 
     @property
     def totalIncome(self):
-        revenues = Revenue.objects.filter(grantLine__grantline_id=self.grantline_id)
-        total = 0
-        for revenue in revenues:
-            total += revenue.amount
+        return (
+            Revenue.objects
+            .filter(grantLine=self)
+            .aggregate(total=Coalesce(Sum("amount"), Value(Decimal("0.00"))))
+        )["total"]
 
-        return f"{total:.2f}"
+    @property
+    def budgetRemaining(self):
+        return (self.line_budgeted or Decimal("0.00")) - self.budgetSpent
 
     def clean(self):
         lines = GrantLine.objects.filter(grant=self.grant)
@@ -608,24 +773,18 @@ class GrantLine(models.Model):
 
     class Meta:
         db_table = "Grant Lines"
+        verbose_name = "Grant Line"
+
+        default_permissions = ("add", "change", "delete", "view")
+
+        permissions = [
+            ("manage_grant_lines", "Can manage grant lines"),
+            ("approve_grant_line_budget", "Can approve grant line budgets"),
+    ]
 
 
 # Have a table made but dont use it right now
-class GrantItem(models.Model):
-    item_id = models.AutoField(primary_key=True, verbose_name="Item ID")
-    fund_type = models.CharField(
-        max_length=50, choices=FundSource.choices, verbose_name="Fund Type"
-    )
-    line = models.ForeignKey(Line, on_delete=models.CASCADE)
-    fund_year = models.IntegerField(verbose_name="Fund Year")
-    item_name = models.CharField(max_length=255, verbose_name="Item Name")
-    line_item = models.CharField(max_length=255, verbose_name="Line")
-    category = models.CharField(max_length=50, verbose_name="Category")
-    fee_based = models.BooleanField(verbose_name="Fee Based")
-    month = models.IntegerField(verbose_name="Month")
 
-    class Meta:
-        db_table = "Grant Items"
 
 
 class BudgetActions(models.Model):
@@ -651,6 +810,14 @@ class BudgetActions(models.Model):
 
     class Meta:
         db_table = "Budget Actions"
+        verbose_name = "Budget Actions"
+
+        default_permissions = ("add", "change", "delete", "view")
+
+        permissions = [
+            ("approve_budget_actions", "Can approve budget actions"),
+            ("manage_budget_actions", "Can manage budget actions"),
+    ]
 
 
 class Carryover(models.Model):
@@ -674,11 +841,18 @@ class Carryover(models.Model):
     fy_end_date = models.DateField(verbose_name="Fiscal Year End Date")
 
     def __str__(self):
-        return self.co_id
+        return str(self.co_id)
 
     class Meta:
         db_table = "Carryover"
+        verbose_name = "Carryover"
 
+        default_permissions = ("add", "change", "delete", "view")
+
+        permissions = [
+            ("manage_carryover", "Can manage carryover"),
+            ("view_carryover_reports", "Can view carryover reports"),
+    ]
 
 class HealthInsurance(models.TextChoices):
     single = "Single"
@@ -694,178 +868,28 @@ class LifeInsurance(models.TextChoices):
     rate2 = "Rate 2"
 
 
-class Benefits(models.Model):
-    employee = models.ForeignKey(
-        Employee, on_delete=models.CASCADE, verbose_name="Employee"
-    )
-    hrs_per_pay = models.DecimalField(
-        max_digits=6, decimal_places=2, verbose_name="Hours Per Pay"
-    )
-    vac_elig = models.BooleanField(
-        default=True, verbose_name="Vacation Eligible"
-    )  # not sure on default
-    ins_type = models.CharField(
-        max_length=10, choices=HealthInsurance.choices, verbose_name="Insurance Type"
-    )
-    board_ins_share = models.DecimalField(
-        max_digits=15, decimal_places=2, verbose_name="Board Insurance Share"
-    )
-    life_rate = models.CharField(
-        max_length=10, choices=LifeInsurance.choices, verbose_name="Life Insurance Rate"
-    )
-
-    @property
-    def pers(self):
-        value = round((float(self.employee.pay_rate) * 0.14), 2)
-        return f"{value:.2f}"
-
-    @property
-    def medicare(self):
-        value = round(float(self.employee.pay_rate) * 0.0145, 2)
-        return f"{value:.2f}"
-
-    # CHECK WHERE TO GET HOURS FROM
-    @property
-    def wc(self):
-        value = round(0.22 / float(self.hrs_per_pay), 2)
-        return f"{value:.2f}"
-
-    @property
-    def plar(self):
-        yos = self.employee.yos
-        factor = 0.03875
-        if yos >= 8 and yos < 15:
-            factor = 0.0575
-        elif yos >= 15 and yos < 25:
-            factor = 0.0775
-        elif yos >= 25:
-            factor = 0.096
-        value = round(float(yos) * factor, 2)
-        return f"{value:.2f}"
-
-    @property
-    def vacation(self):
-        if self.vac_elig:
-            value = round(float(self.plar) * float(self.employee.pay_rate), 2)
-        else:
-            value = 0
-        return f"{value:.2f}"
-
-    @property
-    def sick(self):
-        value = round(float(self.employee.pay_rate) * 0.0575, 2)
-        return f"{value:.2f}"
-
-    @property
-    def holiday(self):
-        value = round(
-            (
-                96
-                * (
-                    float(self.employee.pay_rate)
-                    + float(self.pers)
-                    + float(self.medicare)
-                    + float(self.wc)
-                )
-            )
-            / (float(self.hrs_per_pay) * 26),
-            2,
-        )
-        return f"{value:.2f}"
-
-    @property
-    def total_hrly(self):
-        value = (
-            float(self.employee.pay_rate)
-            + float(self.pers)
-            + float(self.medicare)
-            + float(self.wc)
-            + float(self.vacation)
-            + float(self.sick)
-            + float(self.holiday)
-        )
-        return f"{value:.2f}"
-
-    @property
-    def percent_leave(self):
-        value = (
-            (float(self.vacation) + float(self.sick) + float(self.holiday))
-            / float(self.total_hrly)
-        ) * float(100)
-        return f"{value:.2f}"
-
-    @property
-    def monthly_hours(self):
-        value = round(float(self.hrs_per_pay) * 4, 2)
-        return f"{value:.2f}"
-
-    @property
-    def board_share_hrly(self):
-        if float(self.monthly_hours) > 0:
-            value = round(float(self.board_ins_share) / float(self.monthly_hours), 2)
-        else:
-            value = 0
-        return f"{value:.2f}"
-
-    @property
-    def life_hourly(self):
-        rate = self.life_rate
-        if rate == LifeInsurance.ineligible:
-            factor = 0
-        elif rate == LifeInsurance.rate1:
-            factor = Variable.objects.get(name="insuranceRate1").value
-        elif rate == LifeInsurance.rate2:
-            factor = Variable.objects.get(name="insuranceRate2").value
-
-        value = float(factor) / float(self.monthly_hours)
-        return f"{value:.2f}"
-
-    @property
-    def salary(self):
-        value = round(float(self.employee.pay_rate) * float(self.hrs_per_pay), 2)
-        return f"{value:.2f}"
-
-    @property
-    def fringes(self):
-        value = round(
-            ((float(self.pers) + float(self.medicare)) * float(self.hrs_per_pay) * 26)
-            + (float(self.board_ins_share) * 12),
-            2,
-        )
-        return f"{value:.2f}"
-
-    @property
-    def total_comp(self):
-        value = round(float(self.salary) + float(self.fringes), 2)
-        return f"{value:.2f}"
-
-    def __str__(self):
-        return self.employee
-
-    class Meta:
-        db_table = "Benefits"
-
-
 class transactionType(models.TextChoices):
     revenue = "Revenue"
     expense = "Expense"
 
 
 class paymentType(models.TextChoices):
-    cash = "Cash"
-    card = "Card"
-    check = "Check"
+    cash = "Cash", "Cash"
+    card = "Card", "Card"
+    check = "Check", "Check"
+    electronicTransfer = "Electronic Transfer", "Electronic Transfer"
+    onlinePayment = "Online Payment", "Online Payment"
 
 
 class Revenue(models.Model):
     item = models.ForeignKey(Item, on_delete=models.CASCADE, verbose_name="Item")
-    date = models.DateField(auto_now_add=True, verbose_name="Date")
+    date = models.DateField(default=timezone.now, verbose_name="Date")
     people = models.ForeignKey(People, on_delete=models.PROTECT, verbose_name="People")
     amount = models.DecimalField(max_digits=20, decimal_places=2, verbose_name="Amount")
     payType = models.CharField(
         max_length=20, choices=paymentType.choices, verbose_name="Payment Type"
     )
-    reference = models.IntegerField(verbose_name="Reference")
+    reference = models.CharField(max_length=50, verbose_name="Reference", null = True, blank = True)
     comment = models.CharField(max_length=500, verbose_name="Comment")
     ActivityList = models.ForeignKey(
         ActivityList, on_delete=models.PROTECT, verbose_name="Activity List"
@@ -873,13 +897,13 @@ class Revenue(models.Model):
     line = models.ForeignKey(Line, on_delete=models.PROTECT, verbose_name="Line")
     # odhafr = models.CharField(max_length=50, verbose_name="ODH AFR")
     employee = models.ForeignKey(
-        Employee, on_delete=models.PROTECT, verbose_name="Employee"
+        Employee, on_delete=models.PROTECT, verbose_name="Employee", null=True, blank=True
     )
     grantLine = models.ForeignKey(
         GrantLine,
-        on_delete=models.PROTECT,
-        blank=True,
+        on_delete=models.SET_NULL,
         null=True,
+        blank=True,
         verbose_name="Grant Line",
     )
 
@@ -889,24 +913,39 @@ class Revenue(models.Model):
                 raise ValidationError({"grantLine": "Please select a revenue line"})
 
     def save(self, *args, **kwargs):
-        # Check if this is the first time calling save on this object
         creating = self._state.adding
+        importingOldData = getattr(self, "_importing_old_data", False)
 
         if creating:
             self.line = self.item.line
 
         self.full_clean()
+
         with transaction.atomic():
             fund = self.line.fund
+
             super().save(*args, **kwargs)
-            fund.fund_cash_balance += self.amount
-            fund.save()
+
+            # Only update fund balance for normal new revenue entries.
+            # Do not update it when importing old records.
+            if creating and not importingOldData:
+                fund.fund_cash_balance += self.amount
+                fund.save()
 
     def __str__(self):
         return f"{self.people} - {self.line} - {self.date} - ${self.amount}"
 
     class Meta:
         db_table = "Revenue"
+        verbose_name = "Revenue"
+
+        #default_permissions = ("add", "change", "delete", "view")
+
+        #permissions = [
+            #("manage_revenue", "Can manage revenue"),
+            #("approve_revenue", "Can approve revenue"),
+            #("view_revenue_reports", "Can view revenue reports"),
+    #]
 
 
 class Expense(models.Model):
@@ -917,7 +956,7 @@ class Expense(models.Model):
     warrant = models.IntegerField(verbose_name="Warrant")
     comment = models.CharField(max_length=500, verbose_name="Comment")
     ActivityList = models.ForeignKey(
-        ActivityList, on_delete=models.PROTECT, verbose_name="Activity List"
+        ActivityList, on_delete=models.SET_NULL, null=True, blank=True, verbose_name="Activity List"
     )
     line = models.ForeignKey(Line, on_delete=models.PROTECT, verbose_name="Line")
     # odhafr = models.CharField(max_length=50, verbose_name="ODH AFR")
@@ -933,7 +972,7 @@ class Expense(models.Model):
     )
 
     # Field to use to see if we have duplicates when importing form excel
-    expenseFullID = models.CharField(max_length=50, verbose_name="Expense Full ID")
+    expenseFullID = models.CharField(max_length=50, verbose_name="Expense Full ID", null = True, blank = True)
 
     def clean(self):
         line = self.item.line
@@ -955,12 +994,14 @@ class Expense(models.Model):
             )
 
     def save(self, *args, **kwargs):
-        # Check if this is the first time calling save on this object
         creating = self._state.adding
+        importingOldData = getattr(self, "_importing_old_data", False)
 
         if creating:
             self.line = self.item.line
+
             print(f"Full ID: {self.expenseFullID}")
+
             if self.expenseFullID == "":
                 timeNow = datetime.now().time()
                 timeNow = timeNow.strftime("%H:%M")
@@ -968,25 +1009,44 @@ class Expense(models.Model):
                 fullID = f"{self.employee.employee_id}-{self.ActivityList.ActivityList_id}-{date.isoformat()}-{timeNow}"
                 self.expenseFullID = fullID
 
-        self.full_clean()
+        # Normal website expenses should be validated.
+        # Old imported expenses should not be blocked by current fund cash balance.
+        if not importingOldData:
+            self.full_clean()
+
         with transaction.atomic():
             fund = self.line.fund
+
             super().save(*args, **kwargs)
-            fund.fund_cash_balance -= self.amount
-            fund.save()
+
+            # Normal website expenses should subtract from fund cash balance.
+            # Old imported expenses should NOT subtract again.
+            if creating and not importingOldData:
+                fund.fund_cash_balance -= self.amount
+                fund.save()
 
     def __str__(self):
         return f"{self.people} - {self.line} - {self.date} - ${self.amount}"
 
     class Meta:
         db_table = "Expense"
+        verbose_name = "Expense"
 
+        default_permissions = ("add", "change", "delete", "view")
+
+        permissions = [
+            ("manage_expenses", "Can manage expenses"),
+            ("approve_expenses", "Can approve expenses"),
+            ("view_expense_reports", "Can view expense reports"),
+    ]
 
 class AccessControl(models.Model):
     title = models.CharField(max_length=100)
 
     class Meta:
         permissions = [("has_full_access", "Has full access to all views")]
+        db_table = "Access Control"
+        verbose_name = "Access Control"
 
 
 """
@@ -1016,3 +1076,9 @@ class Testing(models.Model):
 
     class Meta:
         db_table = "Testing"
+
+        default_permissions = ("add", "change", "delete", "view")
+
+        permissions = [
+            ("manage_testing", "Can manage testing"),
+    ]

@@ -1,21 +1,26 @@
+from multiprocessing import context
+from urllib import request
+
 from django.shortcuts import render, get_object_or_404, redirect
 from django.http import HttpResponse, JsonResponse
-from .models import Fund, Testing, Item, Grant, GrantLine, Revenue, Expense, Line, People
+from .models import Fund, Testing, Item, Grant, GrantLine, Revenue, Expense, Line, People, ActivityList, InsuranceAssignment, InsurancePercentage, InsuranceAllocation, Employee
 from django.db.models.fields.related import ForeignKey, ManyToManyField, OneToOneField
-from .forms import TableSelect, InputSelect, ExportSelect,reconcileForm, FileInput
+from .forms import TableSelect, InputSelect, ExportSelect,reconcileForm, FileInput, ProjectionCalcForm
 from django.forms import modelform_factory, Select
 from django import forms
 from django.apps import apps
 from django.db.models import DecimalField, AutoField
 from django.db import models, transaction
 from django.contrib.auth import authenticate, login
-from django.contrib.auth.decorators import permission_required
+from django.contrib.auth.decorators import permission_required, login_required
 from django.contrib import messages
-from reportlab.lib.pagesizes import letter
+from reportlab.lib.pagesizes import letter, landscape
 from reportlab.lib import colors
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import inch
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, Table, TableStyle
 from io import BytesIO
+import re
 import pandas as pd
 from openpyxl import load_workbook
 from openpyxl.styles import PatternFill
@@ -28,15 +33,42 @@ from django.utils.timezone import now
 from django.utils.dateparse import parse_datetime
 from django.core.exceptions import ValidationError
 import re
+from decimal import Decimal
+from django.db.models import Sum, Value
+from django.db.models.functions import Coalesce
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+from matplotlib.ticker import FuncFormatter
+import io
+import base64
+from decimal import ROUND_HALF_UP
+from collections import defaultdict
+import calendar
+from datetime import date
+from django.core.exceptions import PermissionDenied
+from django.core.exceptions import ObjectDoesNotExist
+import traceback
+from django.contrib.admin.models import LogEntry
+import csv
+from django.contrib.admin.views.decorators import staff_member_required
+from django.db import connection
+from django.core.management.color import no_style
 
 def generate_pdf(request, tableName):
     buffer = BytesIO()
 
-    # Create a PDF
-    doc = SimpleDocTemplate(buffer, pagesize=letter)
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=landscape(letter),
+        rightMargin=20,
+        leftMargin=20,
+        topMargin=25,
+        bottomMargin=25,
+    )
+
     elements = []
     styles = getSampleStyleSheet()
-
 
     title_style = ParagraphStyle(
         "TitleStyle",
@@ -46,102 +78,196 @@ def generate_pdf(request, tableName):
         fontName="Helvetica-Bold"
     )
 
-    subtitle_style = ParagraphStyle(
-        "SubtitleStyle",
+    table_text_style = ParagraphStyle(
+        "TableText",
         parent=styles["Normal"],
-        fontSize=11,
-        textColor=colors.black,
-        spaceAfter=6,
-        fontName="Helvetica-Oblique"
+        fontSize=7,
+        leading=9,
+        wordWrap="CJK",
+        alignment=0,
     )
 
-
-    #logo = Image("logo.png", width=80, height=80)
-    #logo.hAlign = 'LEFT'
-    #elements.append(logo)
+    header_style = ParagraphStyle(
+        "HeaderStyle",
+        parent=styles["Normal"],
+        fontSize=7,
+        leading=8,
+        alignment=1,
+        fontName="Helvetica-Bold",
+        wordWrap="CJK",
+    )
 
     elements.append(Spacer(1, 12))
-
-    # Report Title
     elements.append(Paragraph("Washington County Health Department", title_style))
-    elements.append(Paragraph(
-        "List of Active Grants. Active means they have been awarded and the final expenditure report has not yet been approved.",
-        subtitle_style
-    ))
-
     elements.append(Spacer(1, 12))
 
-    #Same logic as tableView, needs updated to current 
-    model = apps.get_model('WCHDApp', tableName)
-    values = model.objects.all().values()
-    fields = model._meta.get_fields()
-    fieldNames = []
-    decimalFields = []
-    aliasNames = []
-    for field in fields:
-        if field.is_relation:
-            if field.auto_created:
-                continue
-            else:
-                parentModel = apps.get_model('WCHDApp', field.name)
-                fkName = parentModel._meta.pk.name
-                fkAlias = parentModel._meta.pk.verbose_name
-                aliasNames.append(fkAlias)
-                fieldNames.append(fkName)
+    model = apps.get_model("WCHDApp", tableName)
+    selected_ids = request.GET.getlist("selected_rows")
 
+    queryset = model.objects.all()
+
+    # Load related objects so foreign keys display as names instead of IDs
+    if tableName.lower() == "revenue":
+        queryset = queryset.select_related(
+            "item",
+            "people",
+            "ActivityList",
+            "employee",
+            "line",
+            "grantLine",
+        )
+
+    elif tableName.lower() == "expense":
+        queryset = queryset.select_related(
+            "item",
+            "people",
+            "ActivityList",
+            "employee",
+            "line",
+            "grantLine",
+        )
+
+    if selected_ids:
+        queryset = queryset.filter(id__in=selected_ids)
+
+    fields = model._meta.get_fields()
+
+    fieldNames = []
+    aliasNames = []
+
+    fieldsToSkip = [
+        "line",
+        "line_id",
+        "grantLine",
+        "grantLine_id",
+    ]
+
+    for field in fields:
+        # Skip reverse relationships
+        if field.is_relation and field.auto_created:
+            continue
+
+        # Skip line and grant line columns
+        if field.name in fieldsToSkip:
+            continue
+
+        if field.is_relation:
+            aliasNames.append(field.verbose_name)
+            fieldNames.append(field.name)
         else:
-            if isinstance(field, DecimalField):
-                decimalFields.append(field.name)
-            aliasNames.append(field.verbose_name)  
+            aliasNames.append(field.verbose_name)
             fieldNames.append(field.name)
 
-    data = [
-        aliasNames,
-    ]
-    
-    for row in values:
-        print(row)
+    data = [[Paragraph(str(name).title(), header_style) for name in aliasNames]]
+
+    for row in queryset:
         line = []
-        for field in fieldNames:
-            line.append(row[field])
+
+        for fieldName in fieldNames:
+            value = getattr(row, fieldName, "")
+
+            # If field has choices, show the readable display value
+            fieldObject = model._meta.get_field(fieldName)
+
+            if fieldObject.choices:
+                displayMethod = f"get_{fieldName}_display"
+                text = getattr(row, displayMethod)()
+
+            # If foreign key, show the related object's string name
+            elif fieldObject.is_relation:
+                text = str(value) if value else ""
+
+            else:
+                text = str(value) if value is not None else ""
+
+            line.append(Paragraph(text, table_text_style))
+
         data.append(line)
 
+    col_count = max(len(r) for r in data)
+    usable_width = landscape(letter)[0] - doc.leftMargin - doc.rightMargin
 
-    # Table Styling
-    table = Table(data, colWidths=[80, 70, 70, 70, 70, 50, 100, 50, 90, 40])
+    # Default column widths
+    col_widths = [usable_width / col_count] * col_count
+
+    # Make common long-text columns wider
+    for index, name in enumerate(aliasNames):
+        lowerName = str(name).lower()
+
+        if lowerName in ["id"]:
+            col_widths[index] = 0.75 * inch
+
+        elif "comment" in lowerName:
+            col_widths[index] = 2.5 * inch
+
+        elif "person" in lowerName or "people" in lowerName:
+            col_widths[index] = 1.4 * inch
+
+        elif "activity" in lowerName or "program" in lowerName:
+            col_widths[index] = 1.4 * inch
+
+        elif "employee" in lowerName:
+            col_widths[index] = 1.3 * inch
+
+        elif "amount" in lowerName:
+            col_widths[index] = 0.75 * inch
+
+        elif "date" in lowerName:
+            col_widths[index] = 0.8 * inch
+
+    # Rebalance if widths are too wide
+    total_width = sum(col_widths)
+
+    if total_width > usable_width:
+        scale = usable_width / total_width
+        col_widths = [width * scale for width in col_widths]
+
+    table = Table(
+        data,
+        colWidths=col_widths,
+        repeatRows=1,
+        splitByRow=True,
+    )
+
     table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), colors.darkgray),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
         ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("BOTTOMPADDING", (0, 0), (-1, 0), 5),
+
+        ("ALIGN", (0, 0), (-1, 0), "CENTER"),
+        ("ALIGN", (0, 1), (-1, -1), "LEFT"),
+
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+
+        ("BOTTOMPADDING", (0, 0), (-1, 0), 6),
+        ("TOPPADDING", (0, 0), (-1, 0), 6),
+
+        ("TOPPADDING", (0, 1), (-1, -1), 4),
+        ("BOTTOMPADDING", (0, 1), (-1, -1), 4),
+        ("LEFTPADDING", (0, 0), (-1, -1), 3),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 3),
+
         ("BACKGROUND", (0, 1), (-1, -1), colors.whitesmoke),
-        ("GRID", (0, 0), (-1, -1), 1, colors.black),
-        ("FONTSIZE", (0, 0), (-1, -1), 10),
-        ("TOPPADDING", (0, 0), (-1, 0), 10),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.black),
     ]))
 
     elements.append(table)
 
-    # Totals (below table)
     elements.append(Spacer(1, 12))
-    elements.append(Paragraph("<b>Total Active Grants:</b> $571,880.00", styles["Normal"]))
-    elements.append(Paragraph("<b>Total Amount for Project:</b> $19,144.00", styles["Normal"]))
+    elements.append(Paragraph("340 Muskingum Drive, Suite B, Marietta, OH 45750", styles["Normal"]))
+    elements.append(Paragraph("740.374.2782 www.washingtongov.org/health", styles["Normal"]))
 
-    #Build PDF
     doc.build(elements)
 
-    # Get the PDF value from buffer
     buffer.seek(0)
     pdf_data = buffer.getvalue()
     buffer.close()
 
-    response = HttpResponse(pdf_data, content_type='application/pdf')
-    response['Content-Disposition'] = f'inline; filename="testing.pdf"'
+    response = HttpResponse(pdf_data, content_type="application/pdf")
+    response["Content-Disposition"] = f'inline; filename="{tableName}_report.pdf"'
 
     return response
 
-@permission_required('WCHDApp.has_full_access', raise_exception=True)
 def reconcile(request):
     if request.method == "POST":
         form = reconcileForm(request.POST, request.FILES)
@@ -201,7 +327,6 @@ def reconcile(request):
     return render(request, "WCHDApp/reconcile.html", {"form":form})
 
 #This view is used to select what table we want to create a report from
-@permission_required('WCHDApp.has_full_access', raise_exception=True)
 def reports(request):
     if request.method == "POST":
         #TableSelect is a form defined in forms.py
@@ -213,6 +338,8 @@ def reports(request):
             tableName = form.cleaned_data['table'] 
             if button == "daily":
                 return redirect('dailyReport')
+            if tableName == "InsuranceReports":
+                return redirect("insuranceReports")
             else:
                 return redirect('generate_pdf', tableName)
     else:
@@ -283,7 +410,6 @@ def logIn(request):
     return render(request, "WCHDApp/logIn.html")
 
 #Logic to get what tables we want to see/create from. Same thing as reports
-@permission_required('WCHDApp.has_full_access', raise_exception=True)
 def viewTableSelect(request):
     if request.method == 'POST':
         form = TableSelect(request.POST)
@@ -320,8 +446,13 @@ def viewTableSelect(request):
     return render(request, "WCHDApp/viewTableSelect.html", {'form': form})
 
 #This function decides what data we use in our tables in tableView.html
-@permission_required('WCHDApp.has_full_access', raise_exception=True)
+@login_required
 def tableView(request, tableName):
+
+    permission_name = f'WCHDApp.view_{tableName.lower()}'
+
+    if not request.user.has_perm(permission_name):
+        raise PermissionDenied
 
     #Grabbing the model selected in viewTableSelect
     model = apps.get_model('WCHDApp', tableName)
@@ -336,9 +467,8 @@ def tableView(request, tableName):
     #Any property that we define in models need to go here so our logic can include them in the table
     calculatedProperties = {
         "Testing": [("fundBalanceMinus3", "Fund Balance Minus 3")],
-        "Benefits": [("pers", "Public Employee Retirement System"), ("medicare", "Medicare"),("wc", "Workers Comp"), ("plar", "Paid Leave Accumulation Rate"), ("vacation", "Vacation"), ("sick", "Sick Leave"), ("holiday", "Holiday Leave"), ("total_hrly", "Total Hourly Cost"), ("percent_leave", "Percent Leave"), ("monthly_hours", "Monthly Hours"), ("board_share_hrly", "Board Share Hourly"), ("life_hourly", "Life Hourly"), ("salary", "Salary"), ("fringes", "Fringes"), ("total_comp", "Total Compensation")],
         "Payroll": [("pay_rate", "Pay Rate")],
-        "Fund":[("calcRemaining", "Remaining"), ("budgeted", "Budgeted")],
+        "Fund":[("calcRemaining", "Remaining Expense"), ("actualRevenue", "Actual Revenue"), ("budgetedRevenue", "Budgeted Revenue"),("budgetedExpense", "Budgeted Expense"),],
         "GrantLine": [("budgetRemaining", "Budget Remaining"), ("budgetSpent", "Budget Spent"), ("totalIncome", "Total Income")],
         "Grant": [("grantAwardAmountRemaining", "Grant Award Amount Remaining"),( "recieved","Recieved")]
     }
@@ -348,6 +478,7 @@ def tableView(request, tableName):
         "Fund": "fund_cash_balance", 
         "Line": "line_total_income",
         "Transaction": "amount",
+        "BudgetActions": "amount",
     }
     
 
@@ -367,23 +498,51 @@ def tableView(request, tableName):
             fieldNames.append(property[0])
             decimalFields.append(property[0])
 
+    def fixedTableName(tableName):
+        return re.sub(r'(?<!^)(?=[A-Z])', ' ', tableName)
+
+    tableName = fixedTableName(tableName)
+
+    context = {
+        "fields" : fieldNames,
+        "aliasNames": aliasNames,
+        "data": values,
+        "tableName" : tableName,
+        "decimalFields" : decimalFields,
+    }
+    
+    if tableName == "Fund":
+        total_remaining = Decimal("0.00")
+        total_budgeted = Decimal("0.00")
+
+        for f in values:
+            total_remaining += (f.calcRemaining or Decimal("0.00"))
+            total_budgeted += (f.budgeted or Decimal("0.00"))
+
+        context["total_remaining"] = total_remaining
+        context["total_budgeted"] = total_budgeted
     #Getting values based on if we defined them in summedFields in order to make accumulator
     if tableName in summedFields:
         field = summedFields[tableName]
-        accumulator = 0
-        for value in values:
-            accumulator += getattr(value, field)
-        context = {"fields": fieldNames, "aliasNames": aliasNames, "data": values, "tableName": tableName, "decimalFields": decimalFields, "accumulator": accumulator}
-    else:
-        context = {"fields": fieldNames, "aliasNames": aliasNames, "data": values, "tableName": tableName, "decimalFields": decimalFields}
+
+        accumulator = values.aggregate(
+            total=Coalesce(Sum(field), Value(Decimal("0.00")))
+        )["total"]
+        context["accumulator"] = accumulator
+        
 
     return render(request, "WCHDApp/tableView.html", context)
 
 #New system to dynamically create forms based of model
 #Default way of creating objects dynamically based on table name
 #Some have overrides as stated above
-@permission_required('WCHDApp.has_full_access', raise_exception=True)
+@login_required
 def createEntry(request, tableName):
+
+    permission_name = f'WCHDApp.add_{tableName.lower()}'
+
+    if not request.user.has_perm(permission_name):
+        raise PermissionDenied
     message = ""
     #Grabbing selected model in viewTableSelect
     model = apps.get_model('WCHDApp', tableName)
@@ -410,124 +569,378 @@ def createEntry(request, tableName):
             form = modelform_factory(model, fields="__all__")()
     return render(request, "WCHDApp/createEntry.html", {"form": form, "tableName": tableName, "message": message})
 
+
+def renameOldImportColumns(tableName, file):
+    columnMap = {}
+
+    if tableName == "ActivityList":
+        columnMap = {
+            "ActivityList_id": "ActivityList_id",
+            "dept_id": "dept_id",
+            "fund_id": "fund_id",
+            "item_id": "item_id",
+        }
+
+    elif tableName == "Item":
+        columnMap = {
+            "item_id": "item_id",
+            "fund_id": "fund_id",
+            "line_id": "line_id",
+        }
+
+    elif tableName == "Line":
+        columnMap = {
+            "line_id": "line_id",
+            "fund_id": "fund_id",
+            "dept_id": "dept_id",
+        }
+
+    elif tableName == "Fund":
+        columnMap = {
+            "fund_id": "fund_id",
+            "dept_id": "dept_id",
+        }
+
+    elif tableName == "Revenue":
+        columnMap = {
+            "item_id": "item_id",
+            "people_id": "people_id",
+            "ActivityList_id": "ActivityList_id",
+            "line_id": "line_id",
+            "employee_id": "employee_id",
+            "grantLine_id": "grantLine_id",
+        }
+
+    elif tableName == "Expense":
+        columnMap = {
+            "item_id": "item_id",
+            "people_id": "people_id",
+            "ActivityList_id": "ActivityList_id",
+            "line_id": "line_id",
+            "employee_id": "employee_id",
+            "grantLine_id": "grantLine_id",
+        }
+
+    return file.rename(columns=columnMap)
+
 #Default import logic, payroll has its own logic and is redirect to its own view
-@permission_required('WCHDApp.has_full_access', raise_exception=True)
+def cleanImportValue(value):
+    """
+    Cleans values coming from old CSV files.
+    """
+
+    if value is None:
+        return None
+
+    value = str(value).strip()
+
+    if value == "" or value.lower() == "nan":
+        return None
+
+    # Converts values like 56.0 into 56
+    if value.endswith(".0"):
+        value = value[:-2]
+
+    return value
+
+def convertOldImportValue(tableName, column, value):
+    if value is None:
+        return None
+
+    value = str(value).strip()
+
+    # Any column that points to a Fund may have old values like 2026-6000.
+    # The new Fund primary key only wants 6000.
+    fundColumns = [
+        "fund_id",
+        "adminPayFund_id",
+        "specialFund_id",
+    ]
+
+    if column in fundColumns and "-" in value:
+        return value.split("-")[-1]
+
+    return value
+
+def cleanDateValue(value):
+    if value is None:
+        return None
+
+    value = str(value).strip()
+
+    if value == "":
+        return None
+
+    dateFormats = [
+        "%Y-%m-%d",   # 2025-12-29
+        "%m/%d/%Y",   # 12/29/2025
+        "%m/%d/%y",   # 12/29/25
+    ]
+
+    for dateFormat in dateFormats:
+        try:
+            return datetime.strptime(value, dateFormat).date()
+        except ValueError:
+            pass
+
+    return value
+
+def resetPrimaryKeySequence(model):
+    sequenceSql = connection.ops.sequence_reset_sql(no_style(), [model])
+
+    with connection.cursor() as cursor:
+        for sql in sequenceSql:
+            cursor.execute(sql)
+
 def imports(request):
     message = ""
-    if request.method == 'POST':
+
+    if request.method == "POST":
         form = InputSelect(request.POST, request.FILES)
+
         if form.is_valid():
-            #Pulls data from submitted files
-            tableName = form.cleaned_data['table']
-            if tableName == 'Payroll':
-                return redirect('clockifyImportPayroll')
-            selectedFile = form.cleaned_data['file']
-            file = pd.read_csv(selectedFile)
-            columns = file.columns
-            row = file.iloc[0]
-            data = []
+            tableName = form.cleaned_data["table"]
 
-            #Grab slected model
-            model = apps.get_model('WCHDApp', tableName)
-            fields = model._meta.get_fields()
+            if tableName == "Payroll":
+                return redirect("clockifyImportPayroll")
 
-            #Define what fields we want to look at from the file and model
-            neededFields = []
-            for field in fields:
-                if field.is_relation:
-                        #fks.append(field.name)
-                        if field.auto_created:
-                            continue
-                        else:
-                            #Grab related model. This is why foreign keys have to be named after the model 
-                            parentModel = apps.get_model('WCHDApp', field.name)
+            selectedFile = form.cleaned_data["file"]
 
-                            #Get the related models primary key
-                            fkName = parentModel._meta.pk.name
-                            neededFields.append(fkName)
-                else:
-                    neededFields.append(field.name)
-            if neededFields != list(columns):
-                message = "Bad File. Please check your CSV format and try again."
-                return render(request, "WCHDApp/imports.html", {"form": form, "message": message})
-            lookUpFields = []
-            fks = []
-            #Same logic as above just for lookups and fk
-            for field in fields:
-                #Logic for foreign keys
-                if field.is_relation:
-                    fks.append(field.name)
+            if tableName == "InsurancePercentage":
+                success, message = processInsurancePercentageImport(selectedFile)
+                return render(
+                    request,
+                    "WCHDApp/imports.html",
+                    {
+                        "form": form,
+                        "message": message,
+                    }
+                )
+
+            try:
+                # Read every value as text so IDs do not become weird decimals
+                file = pd.read_csv(selectedFile, dtype=str).fillna("")
+                file.columns = [column.strip() for column in file.columns]
+
+                model = apps.get_model("WCHDApp", tableName)
+                modelFields = model._meta.get_fields()
+
+                neededFields = []
+
+                for field in modelFields:
+                    # Skip reverse relationships and Django-created fields
                     if field.auto_created:
                         continue
-                    else:
-                        #Grab related model. This is why foreign keys have to be named after the model 
-                        parentModel = apps.get_model('WCHDApp', field.name)
 
-                        #Get the related models primary key
-                        fkName = parentModel._meta.pk.name
-                        #fks.append(fkName)
-                        #Primary keys verbose name
-                        fkAlias = parentModel._meta.pk.verbose_name
-                else:
-                    lookUpFields.append(field)
-            
-            #Creating a dictionary for each row in the file
-            for i in range(len(file)):
-                dict = {}
-                row = file.iloc[i]
-                for column in columns:
-                    dict[column] = row[column]
-                data.append(dict)
-                
-            #For each entry in the dictionary convert types and then create an object based on the dict
-            for line in data:
-                for key in line:
-                    if type(line[key]) == np.int64:
-                        line[key] = int(line[key])
-                    if key in fks:
-                        parentModel = apps.get_model('WCHDApp', key)
-                        print("Grab the object linked")
-                        line[key] = parentModel.objects.get(pk=line[key])
-                print(line)
-                obj, _ = model.objects.update_or_create(
-                    **line,
-                    defaults = line
-                )    
+                    # ForeignKey fields need the actual database column name,
+                    # like fund_id instead of fund
+                    if field.is_relation:
+                        neededFields.append(field.attname)
+                    else:
+                        neededFields.append(field.name)
+
+                csvColumns = list(file.columns)
+
+                missingFields = []
+
+                for fieldName in neededFields:
+                    if fieldName not in csvColumns:
+                        missingFields.append(fieldName)
+
+                if missingFields:
+                    message = f"Bad File. Missing columns: {missingFields}"
+                    return render(
+                        request,
+                        "WCHDApp/imports.html",
+                        {
+                            "form": form,
+                            "message": message,
+                        }
+                    )
+
+                importedCount = 0
+                skippedCount = 0
+
+                for i in range(len(file)):
+                    row = file.iloc[i]
+                    line = {}
+
+                    for column in csvColumns:
+                        if column in neededFields:
+                            if tableName == "Employee" and column == "user_id":
+                                continue
+                            cleanedValue = cleanImportValue(row[column])
+                            cleanedValue = convertOldImportValue(tableName, column, cleanedValue)
+
+                            if column in ["date", "dob", "hire_date"]:
+                                cleanedValue = cleanDateValue(cleanedValue)
+
+                            line[column] = cleanedValue
+
+                    pkField = model._meta.pk
+                    pkName = pkField.name
+                    hasAutoPrimaryKey = pkField.auto_created
+
+                    if not hasAutoPrimaryKey:
+                        if pkName not in line:
+                            message = f"Bad File. Missing primary key column: {pkName}"
+                            return render(request, "WCHDApp/imports.html", {"form": form, "message": message})
+
+                        if line[pkName] is None:
+                            skippedCount += 1
+                            continue
+
+                    # Do not pass None into non-nullable fields if the CSV is blank
+                    cleanLine = {}
+
+                    for key, value in line.items():
+
+                        # Special fix for blank grantLine_id values
+                        if key == "grantLine_id" and (value is None or value == ""):
+                            cleanLine[key] = None
+                            continue
+
+                        try:
+                            field = model._meta.get_field(key)
+                        except:
+                            if key.endswith("_id"):
+                                field = model._meta.get_field(key[:-3])
+                            else:
+                                raise
+
+                        if value is None:
+                            if field.null or field.blank:
+                                cleanLine[key] = None
+                            else:
+                                continue
+                        else:
+                            cleanLine[key] = value
+
+                    if hasAutoPrimaryKey:
+                        if pkName in cleanLine:
+                            cleanLine.pop(pkName)
+
+                        obj = model(**cleanLine)
+
+                        # Imported old Revenue/Expense records should not change fund balances again
+                        if tableName in ["Revenue", "Expense"]:
+                            obj._importing_old_data = True
+
+                        obj.save()
+                        importedCount += 1
+
+                    else:
+                        lookup = {
+                            pkName: cleanLine[pkName]
+                        }
+
+                        model.objects.update_or_create(
+                            **lookup,
+                            defaults=cleanLine
+                        )
+
+                        importedCount += 1
+
+                if tableName == "People":
+                    resetPrimaryKeySequence(model)
+
+                message = f"{tableName} imported successfully. Imported: {importedCount}. Skipped: {skippedCount}."
+
+            except ObjectDoesNotExist as e:
+                message = f"Import failed. A related record does not exist: {e}"
+
+            except Exception as e:
+                print(traceback.format_exc())
+                message = f"Import failed: {e}"
+
+        else:
+            message = "Bad form. Please select a table and upload a CSV file."
+
     else:
         form = InputSelect()
-    
-        
-    return render(request, "WCHDApp/imports.html", {"form": form, "message": message})
 
-@permission_required('WCHDApp.has_full_access', raise_exception=True)
+    return render(
+        request,
+        "WCHDApp/imports.html",
+        {
+            "form": form,
+            "message": message,
+        }
+    )
+
+@login_required
+@permission_required('WCHDApp.manage_exports', raise_exception=True)
 def exports(request):
-
     message = ""
+
     if request.method == 'POST':
         form = ExportSelect(request.POST)
+
         if form.is_valid():
             tableName = form.cleaned_data['table']
             fileName = form.cleaned_data['fileName']
-            
-            model = apps.get_model('WCHDApp', tableName)
-            data = model.objects.all().values()
-            exportData = pd.DataFrame.from_records(data)
 
-            #From what I read the 2 commented lines are how we can show it in a new tab before download
-            #However, its raw text apparently browsers dont like not immediately downloading csv, could be useful for our reports though
+            model = apps.get_model('WCHDApp', tableName)
+            queryset = model.objects.all()
+
+            start_date = form.cleaned_data['start_date']
+            end_date = form.cleaned_data['end_date']
+
+            # If date filtering entered for Revenue or Expense, filter based on date range
+            if tableName in ["Revenue", "Expense"]:
+                if start_date:
+                    queryset = queryset.filter(date__gte=start_date)
+
+                if end_date:
+                    queryset = queryset.filter(date__lte=end_date)
+
+            exportRows = []
+
+            fields = model._meta.fields
+
+            for obj in queryset:
+                row = {}
+
+                for field in fields:
+                    fieldName = field.name
+                    verboseName = field.verbose_name
+
+                    value = getattr(obj, fieldName)
+
+                    # If this field has choices, export the display value
+                    if field.choices:
+                        displayMethod = f"get_{fieldName}_display"
+                        value = getattr(obj, displayMethod)()
+
+                    # If this is a foreign key, export the object's string value instead of the ID
+                    elif field.is_relation:
+                        if value is not None:
+                            value = str(value)
+                        else:
+                            value = ""
+
+                    # Otherwise, export the normal value
+                    else:
+                        if value is None:
+                            value = ""
+
+                    row[verboseName] = value
+
+                exportRows.append(row)
+
+            exportData = pd.DataFrame(exportRows)
+
             response = HttpResponse(content_type='text/csv')
-            #response = HttpResponse(content_type='text/text')
-            #response['Content-Disposition'] = f'inline; filename="{fileName}.csv"'
             response['Content-Disposition'] = f'attachment; filename="{fileName}.csv"'
 
             exportData.to_csv(path_or_buf=response, index=False)
             return response
+
     else:
         form = ExportSelect()
-        
+
     return render(request, "WCHDApp/exports.html", {"form": form, "message": message})
 
-@permission_required('WCHDApp.has_full_access', raise_exception=True)
 def countyPayrollExport(request):
     payperiodModel = apps.get_model('WCHDApp', "PayPeriod")
     payperiods = payperiodModel.objects.all()
@@ -537,71 +950,75 @@ def countyPayrollExport(request):
         fileName = request.POST.get('fileName')
 
         payrollModel = apps.get_model('WCHDApp', "Payroll")
-        entries = payrollModel.objects.select_related('employee', "ActivityList").filter(payperiod__payperiod_id = payperiod)
 
-        #Values for mapping codes later in code
+        entries = payrollModel.objects.select_related(
+            'employee',
+            "ActivityList"
+        ).filter(
+            payperiod__payperiod_id=payperiod
+        )
+
         employeeHoursByActivity = {}
-        codeMappings = {
-            "SICK": "S",
-            "COMP": "C",
-            "VAC": "V",
-            "HOLIDAY": "H"
-        }
-
-        secondaryMapping = {
-            "S": "S-SICK",
-            "C":  "C-COMPTIME",
-            "V": "V-VACATION",
-            "H": "H-HOLIDAY",
-            "R": "R-REGULAR PA"
-        }
 
         for entry in entries:
-            activityName = entry.ActivityList.program.upper()
-            #If the Activity contains a word that is present in codeMapping aka "SICK" it sets the paycode to the abbreviation
-            for keyword, code in codeMappings.items():
-                if keyword in activityName:
-                    paycode = code
-                    break
-                else:
-                    paycode = "R"
-            #Reverting back to a full name
-            paycodeName = secondaryMapping[paycode]
+            employee = entry.employee
+            clockifyProject = entry.clockify_project
+            paycodeName = entry.paycode or getClockifyPaycode(clockifyProject)
 
-            #Creating a dictionary that holds employees hours with paycodes as keys to make running totals
-            if paycodeName not in employeeHoursByActivity:
-                employeeHoursByActivity[paycodeName] = {}
+            if isLeaveClockifyProject(clockifyProject):
+                item = employee.payItem
 
-            if entry.employee in employeeHoursByActivity[paycodeName]:
-                employeeHoursByActivity[paycodeName][entry.employee] += entry.hours
             else:
-                employeeHoursByActivity[paycodeName][entry.employee] = entry.hours
+                activity = entry.ActivityList
 
-        #Creating the csv export
+                if not activity:
+                    raise ValidationError({
+                        "ActivityList": (
+                            f"Payroll entry is missing ActivityList for "
+                            f"{clockifyProject}"
+                        )
+                    })
+
+                item = getPayrollItemForClockifyRow(
+                    employee,
+                    activity,
+                    clockifyProject
+                )
+
+            accountDistribution = getAccountDistributionFromItem(item)
+
+            key = (
+                paycodeName,
+                employee,
+                accountDistribution,
+                employee.pay_rate,
+            )
+
+            if key not in employeeHoursByActivity:
+                employeeHoursByActivity[key] = Decimal("0.00")
+
+            employeeHoursByActivity[key] += entry.hours
+
         exportData = []
-        for activity, employeeDict in employeeHoursByActivity.items():
-            for employee, hours in employeeDict.items():
-                line = employee.payItem.line
-                fullID = line.line_id
-                splitID = fullID.split("-")
-                if len(splitID)==3:
-                    year, fundID, lineID = splitID[0], splitID[1], splitID[2]
-                else:
-                    fundID, lineID = splitID[0], splitID[1]
-                
-                accountDistribution = f"{fundID}50290{lineID}"
-                exportData.append({
-                    "JobNumber": employee.employee_id,
-                    "Paycode": activity,
-                    "Time Group/Description": "",
-                    "Hours": hours,
-                    "HourlyRate": employee.pay_rate,
-                    "Salary": "",
-                    "AccountDistribution": accountDistribution
-                })
+
+        for key, hours in employeeHoursByActivity.items():
+            paycodeName, employee, accountDistribution, hourlyRate = key
+
+            exportData.append({
+                "JobNumber": employee.employee_id,
+                "Paycode": paycodeName,
+                "Time Group/Description": "",
+                "Hours": hours,
+                "HourlyRate": hourlyRate,
+                "Salary": "",
+                "AccountDistribution": accountDistribution
+            })
+
         exportData = pd.DataFrame(exportData)
+
         response = HttpResponse(content_type='text/csv')
         response['Content-Disposition'] = f'attachment; filename="{fileName}.csv"'
+
         exportData.to_csv(path_or_buf=response, index=False)
 
         return response
@@ -609,10 +1026,10 @@ def countyPayrollExport(request):
     context = {
         "payperiods": payperiods
     }
+
     return render(request, "WCHDApp/countyPayrollExport.html", context)
 
 #This is for revenue but was named previous to table split
-@permission_required('WCHDApp.has_full_access', raise_exception=True)
 def transactionsItem(request):
     #This view is just to pull what item we want and pass it to the partial
     #This is a common pattern you will see 
@@ -631,6 +1048,26 @@ def transactionsView(request):
     itemID = request.GET.get('itemSelect')
     revenueValues = revenueModel.objects.filter(item_id=itemID)
 
+    #Filter for sorting by date range
+    start_date = request.GET.get('start_date')
+    end_date = request.GET.get('end_date')
+
+    if start_date and end_date:
+        revenueValues = revenueValues.filter(date__range=[start_date, end_date])
+    elif start_date:
+        revenueValues = revenueValues.filter(date__gte=start_date)
+    elif end_date:
+        revenueValues = revenueValues.filter(date__lte=end_date)
+
+    revenueValues = revenueValues.order_by("date")
+
+    if sort_by:
+        revenueValues = revenueValues.order_by(sort_by)
+
+    accumulator = 0
+    for r in revenueValues:
+        accumulator += r.amount
+
     #Getting just field names from model
     fields = revenueModel._meta.get_fields()
 
@@ -638,7 +1075,7 @@ def transactionsView(request):
     fieldNames = []
     decimalFields = []
     aliasNames = []
-
+   
     #Fields that should be accumulated
     summedFields = {
         "Fund": "fund_cash_balance", 
@@ -665,29 +1102,62 @@ def transactionsView(request):
 
     if request.method == 'POST':
         form = RevenueForm(request.POST)
-        user  = request.user
-        try:
-            employeeModel = apps.get_model('WCHDApp', "employee")
-            employee = employeeModel.objects.get(user=user)
-            form.instance.employee = employee
-        except:
-            message = "No employee with signed in user"
-        form.instance.item = item
-        if form.is_valid():
-            #Create the instance but don't save it yet
-            revenue = form.save()
 
-            message = "Revenue Posted Successfully"
-            form = RevenueForm()
-        else: 
-            errors = form.errors
-            if errors.get("grantLine"):
-                message = errors["grantLine"][0] 
+        employeeModel = apps.get_model('WCHDApp', "employee")
+        employee = employeeModel.objects.filter(user=request.user).first()
+
+        if not employee:
+            message = "No employee with signed in user"
+
+        else:
+            if form.is_valid():
+                revenue = form.save(commit=False)
+
+                revenue.employee = employee
+                revenue.item = item
+
+                revenue.save()
+
+                message = "Revenue Posted Successfully"
+                form = RevenueForm()
+
+            else:
+                errors = form.errors
+
+                if errors.get("grantLine"):
+                    message = errors["grantLine"][0]
+                else:
+                    message = "Revenue could not be posted. Please check the form."
+
     else:
         form = RevenueForm()
 
+    context = {
+        "itemObj": item,
+        "item": itemID,
+        "revenue": revenueValues,  # optional, for other purposes
+        "data": revenueValues,     # <--- THIS MUST BE THE FILTERED QUERYSET
+        "fields": fieldNames,
+        "aliasNames": aliasNames,
+        "decimalFields": decimalFields,
+        "form": form,
+        "message": message,
+        "accumulator": accumulator,
+    }
+
     #return render(request, "WCHDApp/transactionsView.html", {"item": itemID, "revenue": revenueValues,"fields": fieldNames, "aliasNames": aliasNames, "data": revenueValues, "decimalFields": decimalFields, "form":form})
-    return render(request, "WCHDApp/partials/revenueTableAndForm.html", {"itemObj":item, "item": itemID, "revenue": revenueValues,"fields": fieldNames, "aliasNames": aliasNames, "data": revenueValues, "decimalFields": decimalFields, "form":form, "message":message})
+    #return render(request, "WCHDApp/partials/revenueTableAndForm.html", {"itemObj":item, "item": itemID, "revenue": revenueValues,"fields": fieldNames, "aliasNames": aliasNames, "data": revenueValues, "decimalFields": decimalFields, "form":form, "message":message})
+    # Detect HTMX requests
+    """if request.headers.get("HX-Request"):
+        # Return only the partial for HTMX swaps
+        return render(request, "WCHDApp/partials/revenueTableAndForm.html", context)
+    else:
+        # Return full page for normal GET
+        return render(request, "WCHDApp/transactionsView.html", context)"""
+    if request.headers.get("HX-Request"):
+        return render(request, "WCHDApp/partials/revenueTableAndForm.html", context)
+
+    return render(request, "WCHDApp/transactionsView.html", context)
 
 #Used to create a people form within another form for entry time creation
 def addPeopleForm(request):
@@ -717,7 +1187,6 @@ def addPeopleForm(request):
     return render(request, "WCHDApp/partials/formPartial.html", context)
 
 #these are named transaction expense because it was originally built on the transactions table whihc then got split into 2 different tables
-@permission_required('WCHDApp.has_full_access', raise_exception=True)
 def transactionsExpenses(request):
     itemModel = apps.get_model("WCHDApp", "Item")
     items = itemModel.objects.filter(line__lineType="Expense")
@@ -736,6 +1205,34 @@ def transactionsExpenseTableUpdate(request):
     #print(itemID)
     expenseModel = apps.get_model('WCHDApp', "expense")
     expenseValues = expenseModel.objects.filter(item_id=itemID)
+
+    start_date = request.GET.get("start_date")
+    end_date = request.GET.get("end_date")
+    sort_by = request.GET.get("sort_by")
+
+    if start_date and end_date:
+        expenseValues = expenseValues.filter(date__range=[start_date, end_date])
+    elif start_date:
+        expenseValues = expenseValues.filter(date__gte=start_date)
+    elif end_date:
+        expenseValues = expenseValues.filter(date__lte=end_date)
+
+    allowedSorts = [
+        "date", "-date",
+        "amount", "-amount",
+        "item", "-item",
+        "people", "-people",
+        "employee", "-employee",
+    ]
+
+    if sort_by in allowedSorts:
+        expenseValues = expenseValues.order_by(sort_by)
+    else:
+        expenseValues = expenseValues.order_by("date")
+
+    accumulator = 0
+    for e in expenseValues:
+        accumulator += e.amount
 
     #Getting just field names from model
     fields = expenseModel._meta.get_fields()
@@ -776,7 +1273,7 @@ def transactionsExpenseTableUpdate(request):
         user  = request.user
         try:
             employeeModel = apps.get_model('WCHDApp', "employee")
-            employee = employeeModel.objects.get(user=user)
+            employee = employeeModel.objects.filter(user=request.user).first()
             form.instance.employee = employee
         except:
             message = "No employee with signed in user"
@@ -806,11 +1303,11 @@ def transactionsExpenseTableUpdate(request):
         "item": item,
         "message": message,
         "budgeted_remaining": line.budgetRemaining,
+        "accumulator" : accumulator,
     }
 
     return render(request, "WCHDApp/partials/transactionsTablePartial.html", context)
 
-@permission_required('WCHDApp.has_full_access', raise_exception=True)
 def lineView(request):
     funds = Fund.objects.all()
     
@@ -819,6 +1316,8 @@ def lineView(request):
     }
     return render(request, "WCHDApp/lineView.html", context)
 
+@login_required
+@permission_required('WCHDApp.change_line', raise_exception=True)
 def lineTableUpdate(request):
     message = ""
     fundID = request.GET.get("fund")
@@ -837,7 +1336,6 @@ def lineTableUpdate(request):
 
     calculatedProperties = {
         "Testing": [("fundBalanceMinus3", "Fund Balance Minus 3")],
-        "Benefits": [("pers", "Public Employee Retirement System"), ("medicare", "Medicare"),("wc", "Workers Comp"), ("plar", "Paid Leave Accumulation Rate"), ("vacation", "Vacation"), ("sick", "Sick Leave"), ("holiday", "Holiday Leave"), ("total_hrly", "Total Hourly Cost"), ("percent_leave", "Percent Leave"), ("monthly_hours", "Monthly Hours"), ("board_share_hrly", "Board Share Hourly"), ("life_hourly", "Life Hourly"), ("salary", "Salary"), ("fringes", "Fringes"), ("total_comp", "Total Compensation")],
         "Payroll": [("pay_rate", "Pay Rate")],
         "Fund":[("calcRemaining", "Remaining"), ("budgeted", "Budgeted")],
         "Line": [("budgetRemaining", "Budget Remaining"), ("budgetSpent", "Budget Spent"), ("totalIncome", "Total Income")]
@@ -866,7 +1364,7 @@ def lineTableUpdate(request):
         #Excluding fields that are automatic in the model side
         form = modelform_factory(Line, exclude=["fund", "fund_year"])(request.POST)
         form.instance.fund = fund
-        form.instance.fund_year = fund.fund_id.split("-")[0]
+        form.instance.fund_year = fund.year
         if form.is_valid():
             line = form.save()
             message = "Line created successfully"
@@ -894,7 +1392,6 @@ def lineTableUpdate(request):
 
     return render(request, "WCHDApp/partials/lineTableUpdate.html", context)
 
-@permission_required('WCHDApp.has_full_access', raise_exception=True)
 def itemView(request):
     lines = Line.objects.all()
     context = {
@@ -902,6 +1399,8 @@ def itemView(request):
     }
     return render(request, "WCHDApp/itemView.html", context)
 
+@login_required
+@permission_required('WCHDApp.change_item', raise_exception=True)
 def itemTableUpdate(request):
     message = ""
     lineID = request.GET.get("line")
@@ -919,7 +1418,6 @@ def itemTableUpdate(request):
 
     calculatedProperties = {
         "Testing": [("fundBalanceMinus3", "Fund Balance Minus 3")],
-        "Benefits": [("pers", "Public Employee Retirement System"), ("medicare", "Medicare"),("wc", "Workers Comp"), ("plar", "Paid Leave Accumulation Rate"), ("vacation", "Vacation"), ("sick", "Sick Leave"), ("holiday", "Holiday Leave"), ("total_hrly", "Total Hourly Cost"), ("percent_leave", "Percent Leave"), ("monthly_hours", "Monthly Hours"), ("board_share_hrly", "Board Share Hourly"), ("life_hourly", "Life Hourly"), ("salary", "Salary"), ("fringes", "Fringes"), ("total_comp", "Total Compensation")],
         "Payroll": [("pay_rate", "Pay Rate")],
         "Fund":[("calcRemaining", "Remaining"), ("budgeted", "Budgeted")],
         "Line": [("budgetRemaining", "Budget Remaining"), ("budgetSpent", "Budget Spent"), ("totalIncome", "Total Income")],
@@ -950,7 +1448,6 @@ def itemTableUpdate(request):
         form = modelform_factory(Item, exclude=["line", "fund", "fund_year", "fund_type"])(request.POST)
         form.instance.line = line
         form.instance.fund = line.fund
-        form.instance.fund_type = line.fund.sof
         form.instance.fund_year = line.fund_year
     
         if form.is_valid():
@@ -1120,199 +1617,638 @@ def checkPrivileges(request):
 def noPrivileges(request, exception):
     return render(request, "WCHDApp/noPrivileges.html")
 
-@permission_required('WCHDApp.has_full_access', raise_exception=True)
+EMPLOYEE_NAME_ALIASES = {
+    "Sherry": "Sherry Ellem",
+}
+
+def cleanClockifyEmployeeName(name):
+    if not name:
+        return ""
+
+    name = str(name).strip()
+
+    # Remove anything after comma.
+    # Example: "Joshua P. Lane, RS" -> "Joshua P. Lane"
+    name = name.split(",")[0].strip()
+
+    # Remove periods.
+    # Example: "Joshua P. Lane" -> "Joshua P Lane"
+    name = name.replace(".", "")
+
+    # Remove extra spaces.
+    name = " ".join(name.split())
+
+    # Remove common credentials/titles if they appear as separate words.
+    wordsToRemove = [
+        "rs", "rn", "bsn", "mph", "md", "do", "phd",
+        "dr", "mr", "mrs", "ms", "miss"
+    ]
+
+    parts = name.split()
+    cleanedParts = []
+
+    for part in parts:
+        if part.lower() not in wordsToRemove:
+            cleanedParts.append(part)
+
+    return " ".join(cleanedParts).strip()
+
+
+def normalizeName(name):
+    if not name:
+        return ""
+
+    name = str(name).lower()
+    name = name.replace(".", "")
+    name = re.sub(r"[^a-z0-9 ]", "", name)
+    name = " ".join(name.split())
+
+    return name
+
+def cleanPersonName(name):
+    if not name:
+        return ""
+
+    name = str(name).strip()
+    name = name.replace(".", "")
+    name = " ".join(name.split())
+
+    wordsToRemove = [
+        "rs", "rn", "bsn", "mph", "md", "do", "phd",
+        "dr", "mr", "mrs", "ms", "miss"
+    ]
+
+    parts = name.split()
+    cleanedParts = []
+
+    for part in parts:
+        if part.lower() not in wordsToRemove:
+            cleanedParts.append(part)
+
+    return " ".join(cleanedParts).strip()
+
+def getPayrollEmployeeFromClockifyName(clockifyName):
+    Employee = apps.get_model("WCHDApp", "employee")
+
+    if normalizeName(clockifyName) == "sherry":
+        match = Employee.objects.filter(
+            first_name__icontains="Sherry",
+            surname__icontains="Ellem"
+        ).first()
+
+        if match:
+            return match
+
+        match = Employee.objects.filter(
+            first_name__icontains="Sherry Ellem"
+        ).first()
+
+        if match:
+            return match
+
+        raise ValidationError({
+            "employee": "Clockify has Sherry, but no Employee record matched Sherry Ellem."
+        })
+
+    cleanedClockifyName = cleanClockifyEmployeeName(clockifyName)
+    normalizedClockifyName = normalizeName(cleanedClockifyName)
+    print("ORIGINAL CLOCKIFY NAME:", clockifyName)
+    print("CLEANED CLOCKIFY NAME:", cleanedClockifyName)
+    print("NORMALIZED BEFORE ALIAS:", normalizedClockifyName)
+
+    # Special Clockify name fixes
+    if normalizedClockifyName in EMPLOYEE_NAME_ALIASES:
+        aliasName = EMPLOYEE_NAME_ALIASES[normalizedClockifyName]
+        normalizedAliasName = normalizeName(aliasName)
+
+        aliasParts = normalizedAliasName.split()
+        aliasFirst = aliasParts[0] if aliasParts else ""
+        aliasLast = aliasParts[-1] if len(aliasParts) > 1 else ""
+
+        for employee in Employee.objects.all():
+            employeeFirstName = normalizeName(employee.first_name)
+            employeeSurname = normalizeName(employee.surname)
+
+            employeeFullName = normalizeName(
+                f"{employee.first_name or ''} {employee.surname or ''}"
+            )
+
+            employeeFirstParts = employeeFirstName.split()
+            employeeFirstFirstWord = employeeFirstParts[0] if employeeFirstParts else ""
+
+            # Handles first_name="Sherry", surname="Ellem"
+            if employeeFullName == normalizedAliasName:
+                return employee
+
+            # Handles first_name="Sherry Ellem", surname blank
+            if employeeFirstName == normalizedAliasName:
+                return employee
+
+            # Handles first_name="Sherry", surname="Ellem"
+            if aliasFirst == employeeFirstFirstWord and aliasLast == employeeSurname:
+                return employee
+
+        raise ValidationError({
+            "employee": f"Alias '{aliasName}' was set for Clockify name '{clockifyName}', but no matching employee was found."
+        })
+
+    if not normalizedClockifyName:
+        raise ValidationError({
+            "employee": "Employee name is blank"
+        })
+
+    clockifyParts = normalizedClockifyName.split()
+    clockifyFirst = clockifyParts[0]
+    clockifyLast = clockifyParts[-1] if len(clockifyParts) > 1 else ""
+
+    possibleMatches = []
+
+    for employee in Employee.objects.all():
+        employeeFirstName = normalizeName(employee.first_name)
+        employeeSurname = normalizeName(employee.surname)
+
+        employeeFullName = normalizeName(
+            f"{employee.first_name or ''} {employee.surname or ''}"
+        )
+
+        employeeFirstParts = employeeFirstName.split()
+        employeeFirstFirstWord = employeeFirstParts[0] if employeeFirstParts else ""
+
+        # Case 1: exact full-name match
+        # Example: "Jordan Brittany Knoch" == "Jordan Brittany Knoch"
+        if normalizedClockifyName == employeeFullName:
+            possibleMatches.append(employee)
+            continue
+
+        # Case 2: Clockify has first + last, and Employee first_name may contain middle initial/name
+        # Example: Clockify "Alyssa Lewis"
+        # Employee first_name "Alyssa R", surname "Lewis"
+        #
+        # Example: Clockify "Jordan Knoch"
+        # Employee first_name "Jordan Brittany", surname "Knoch"
+        if clockifyLast:
+            if clockifyFirst == employeeFirstFirstWord and clockifyLast == employeeSurname:
+                possibleMatches.append(employee)
+                continue
+
+        # Case 3: Clockify includes middle name, Employee only has first + last
+        # Example: Clockify "Joshua P Lane"
+        # Employee first_name "Joshua", surname "Lane"
+        if len(clockifyParts) >= 2:
+            if clockifyFirst == employeeFirstName and clockifyLast == employeeSurname:
+                possibleMatches.append(employee)
+                continue
+
+        # Case 4: Employee has no last name, Clockify only has first name
+        # Example: Clockify "Sherry"
+        # Employee first_name "Sherry", surname blank
+        if len(clockifyParts) == 1:
+            if clockifyFirst == employeeFirstFirstWord and employeeSurname == "":
+                possibleMatches.append(employee)
+                continue
+
+    if len(possibleMatches) == 1:
+        return possibleMatches[0]
+
+    if len(possibleMatches) > 1:
+        names = ", ".join(str(employee) for employee in possibleMatches)
+
+        raise ValidationError({
+            "employee": (
+                f"Multiple employees matched Clockify name '{clockifyName}': {names}"
+            )
+        })
+
+    raise ValidationError({
+        "employee": (
+            f"No employee found for Clockify name '{clockifyName}'."
+            f"Cleaned name was '{cleanedClockifyName}'. "
+            f"Normalized name was '{normalizedClockifyName}'."
+        )
+    })
+
+def cleanClockifyProjectName(projectName):
+    if not projectName:
+        return ""
+
+    projectName = " ".join(str(projectName).strip().split())
+
+    # Example: "Food Service out" becomes "Food Service"
+    if projectName.lower().endswith(" out"):
+        projectName = projectName[:-4].strip()
+
+    # Add small fixes here if Clockify names are slightly different
+    clockifyNameFixes = {
+        "Emergency Preparednesss": "Emergency Preparedness",
+        "Other Environmental": "ENV Other",
+        "Other Nursing": "PHN Other",
+    }
+
+    return clockifyNameFixes.get(projectName, projectName)
+
+
+def getClockifyPaycode(projectName):
+    cleanedProject = cleanClockifyProjectName(projectName).upper()
+
+    if "SICK" in cleanedProject:
+        return "S-SICK"
+
+    if "VAC" in cleanedProject or "VACATION" in cleanedProject:
+        return "V-VACATION"
+
+    if "HOLIDAY" in cleanedProject:
+        return "H-HOLIDAY"
+
+    if "COMP" in cleanedProject:
+        return "C-COMPTIME"
+
+    return "R-REGULAR PA"
+
+def isLeaveClockifyProject(projectName):
+    paycode = getClockifyPaycode(projectName)
+
+    return paycode in [
+        "S-SICK",
+        "V-VACATION",
+        "H-HOLIDAY",
+        "C-COMPTIME",
+    ]
+
+def getActivityFromClockifyProject(projectName):
+    ActivityList = apps.get_model("WCHDApp", "ActivityList")
+
+    cleanedProject = cleanClockifyProjectName(projectName)
+
+    if not cleanedProject:
+        return None
+
+    return ActivityList.objects.filter(
+        program__iexact=cleanedProject
+    ).first()
+
+
+def getPayrollItemForClockifyRow(employee, activity, clockifyProject):
+    # Sick/Vacation/Holiday/Comp do not need ActivityList.
+    # They should use the employee's normal pay item/admin fund.
+    if isLeaveClockifyProject(clockifyProject):
+        return employee.payItem
+
+    # Normal ActivityList logic
+    if activity.payType == "special":
+        return employee.specialPayItem
+
+    if activity.payType == "admin":
+        return employee.payItem
+
+    return activity.item
+
+
+def getAccountDistributionFromItem(item):
+    line = item.line
+    fullID = line.line_id
+    splitID = fullID.split("-")
+
+    if len(splitID) == 3:
+        year, fundID, lineID = splitID[0], splitID[1], splitID[2]
+    else:
+        fundID, lineID = splitID[0], splitID[1]
+
+    # Keep this exact format
+    accountDistribution = f"{fundID}50290{lineID}"
+
+    return accountDistribution
+
+def getPeopleForEmployee(employee):
+    PeopleModel = apps.get_model("WCHDApp", "People")
+
+    employeeFirstName = normalizeName(employee.first_name)
+    employeeSurname = normalizeName(employee.surname)
+
+    employeeFirstParts = employeeFirstName.split()
+    employeeFirstFirstWord = employeeFirstParts[0] if employeeFirstParts else ""
+
+    possibleMatches = []
+
+    for person in PeopleModel.objects.all():
+        personName = normalizeName(cleanPersonName(person.name))
+        personParts = personName.split()
+
+        if not personParts:
+            continue
+
+        personFirst = personParts[0]
+        personLast = personParts[-1] if len(personParts) > 1 else ""
+
+        # Exact match:
+        # Employee: Jordan Brittany Knoch
+        # People: Jordan Brittany Knoch
+        employeeFullName = normalizeName(
+            f"{employee.first_name or ''} {employee.surname or ''}"
+        )
+
+        if personName == employeeFullName:
+            possibleMatches.append(person)
+            continue
+
+        # First word of employee first_name + surname:
+        # Employee: Jordan Brittany + Knoch
+        # People: Jordan Knoch
+        if employeeSurname:
+            if personFirst == employeeFirstFirstWord and personLast == employeeSurname:
+                possibleMatches.append(person)
+                continue
+
+        # No surname case:
+        # Employee: Sherry
+        # People: Sherry
+        if not employeeSurname and personName == employeeFirstName:
+            possibleMatches.append(person)
+            continue
+
+    if len(possibleMatches) == 1:
+        return possibleMatches[0]
+
+    if len(possibleMatches) > 1:
+        names = ", ".join(str(person) for person in possibleMatches)
+
+        raise ValidationError({
+            "people": (
+                f"Multiple People objects matched employee "
+                f"{employee.first_name} {employee.surname}: {names}"
+            )
+        })
+
+    raise ValidationError({
+        "people": (
+            f"No People object found for employee "
+            f"{employee.first_name} {employee.surname}"
+        )
+    })
+
+def getActivityForClockifyRow(clockifyProject, clockifyDepartment):
+    ActivityList = apps.get_model("WCHDApp", "ActivityList")
+
+    cleanedProject = cleanClockifyProjectName(clockifyProject)
+
+    # First try matching the project directly
+    activity = ActivityList.objects.filter(
+        program__iexact=cleanedProject
+    ).first()
+
+    if activity:
+        return activity
+
+    # If no direct match, map unknown Administration department projects to Administration
+    cleanedDepartment = " ".join(str(clockifyDepartment or "").strip().split())
+
+    if cleanedDepartment.lower() == "administration":
+        return ActivityList.objects.filter(
+            program__iexact="Administration"
+        ).first()
+
+    return None
+
+@login_required
+@permission_required('WCHDApp.process_payroll', raise_exception=True)
 def clockifyImportPayroll(request, *args, **kwargs):
     message = ""
 
-    #Making an id to make payroll is like 2025-01
-    idTracker = 0
-    year = datetime.now().year
-    #Mapping fields from clockify to fields our models use
     fieldMap = {
-        "Project": "ActivityList",
-        #"Department": "dept",
+        "Project": "clockify_project",
+        "Department": "clockify_department",
         "User": "employee",
         "Start Date": "beg_date",
         "End Date": "end_date",
-        #"Billable Rate (USD)": "billableRate",
         "Billable Amount (USD)": "pay_amount",
-        "Duration (decimal)": "hours"
+        "Duration (decimal)": "hours",
     }
 
     if request.method == 'POST':
         form = FileInput(request.POST, request.FILES)
+
         if form.is_valid():
             selectedFile = form.cleaned_data['file']
             dateInputted = request.POST.get("date")
-            print(f"DATE INPUTTED: {dateInputted}")
-            file = pd.read_csv(selectedFile)
-            file.dropna(how='all', inplace=True)
-            columns = file.columns
-            row = file.iloc[0]
-            data = []
-            
-            model = apps.get_model('WCHDApp', 'Payroll')
-            fields = model._meta.get_fields()
-            neededFields = []
-            #Exclude autocreated fields like id
-            for field in fields:
-                if not field.auto_created:
-                    neededFields.append(field.name)
 
-            columns = list(columns)
-            
-            #Creating a list of indices that we want from columns
-            neededIndexes = []
-            for i in range(len(columns)):
-                if columns[i] in fieldMap:
-                    #updated columns[i] to the name we need for the model
-                    columns[i] = fieldMap[columns[i]]
-                    neededIndexes.append(i)
-
-            #Creating a list of dictionaries for each row with the values we need
-            for i in range(len(file)):
-                dict = {}
-                row = file.iloc[i]
-                startTime = row["Start Time"]
-                startTimeHour = startTime.split(" ")[0]
-                for j in neededIndexes:
-                    column = columns[j]
-                    if column == "beg_date" or column == "end_date":
-                        payPeriodModel = apps.get_model('WCHDApp', 'PayPeriod')
-                        periods = payPeriodModel.objects.all()
-                        date = row[j]
-                        newDate = datetime.strptime(date, "%m/%d/%Y").date()
-                        dict[column] = newDate
-                        payPeriodFound = False
-                        for period in periods:
-                            if period.periodStart <= newDate <= period.periodEnd:
-                                dict['payperiod'] = period   
-                                payPeriodFound = True   
-                    else:
-                        dict[column] = row[j]
-                dict["startTime"] = startTimeHour
-                #dict['payroll_id'] = str(year)+"-"+str(idTracker)
-                idTracker += 1
-                data.append(dict)
-
-            lookUpFields = []
-            fks = []
-            for field in fields:
-                #Logic for foreign keys
-                if field.is_relation:
-                    fks.append(field.name)
-                else:
-                    lookUpFields.append(field)
             try:
-                #transaction so that if something fails everything leading up to it is rolled back, no half imports
+                file = pd.read_csv(selectedFile)
+                file.dropna(how='all', inplace=True)
+                originalRowCount = len(file)
+
+                file = file[
+                    file["Approval"].astype(str).str.strip().str.lower() == "approved"
+                ]
+
+                approvedRowCount = len(file)
+                skippedRowCount = originalRowCount - approvedRowCount
+
+                if file.empty:
+                    message = "No approved rows found in the Clockify file."
+                    return render(
+                        request,
+                        "WCHDApp/clockifyImportPayroll.html",
+                        {"form": form, "message": message}
+                    )
+            except Exception as e:
+                message = f"Could not read file: {e}"
+                return render(
+                    request,
+                    "WCHDApp/clockifyImportPayroll.html",
+                    {"form": form, "message": message}
+                )
+
+            data = []
+
+            payrollModel = apps.get_model('WCHDApp', 'Payroll')
+            payPeriodModel = apps.get_model('WCHDApp', 'PayPeriod')
+
+            source_columns = list(file.columns)
+
+            mapped_columns = []
+            for source_col in source_columns:
+                if source_col in fieldMap:
+                    mapped_columns.append((source_col, fieldMap[source_col]))
+
+            for _, row in file.iterrows():
+                row_dict = {}
+
+                try:
+                    startTime = str(row["Start Time"])
+                    startTimeHour = startTime.split(" ")[0]
+                except Exception:
+                    startTimeHour = ""
+
+                for source_col, model_col in mapped_columns:
+                    value = row[source_col]
+
+                    if pd.isna(value):
+                        value = None
+
+                    if model_col in ["beg_date", "end_date"] and value is not None:
+                        try:
+                            newDate = datetime.strptime(str(value), "%m/%d/%Y").date()
+                        except ValueError:
+                            raise ValidationError({
+                                "payperiod": f"Invalid date format in {source_col}: {value}"
+                            })
+
+                        row_dict[model_col] = newDate
+
+                        period = payPeriodModel.objects.filter(
+                            periodStart__lte=newDate,
+                            periodEnd__gte=newDate
+                        ).first()
+
+                        if period:
+                            row_dict["payperiod"] = period
+
+                    else:
+                        row_dict[model_col] = value
+
+                row_dict["startTime"] = startTimeHour
+                data.append(row_dict)
+
+            try:
                 with transaction.atomic():
-                    
                     for line in data:
                         if 'payperiod' not in line:
-                            raise ValidationError({"payperiod": "No payperiod for this date range"}) 
-                        for key in line:
-                            if type(line[key]) == np.int64:
+                            raise ValidationError({
+                                "payperiod": "No payperiod for this date range"
+                            })
+
+                        # Convert numpy types
+                        for key in list(line.keys()):
+                            if isinstance(line[key], np.integer):
                                 line[key] = int(line[key])
-                            if key in fks:
-                                #Linking objects with the fields we have
-                                parentModel = apps.get_model('WCHDApp', key)
-                                if key == "employee":
-                                    names = line[key].split(" ")
-                                    try:
-                                        line[key] = parentModel.objects.get(first_name=names[0], surname=names[1])
-                                    except:
-                                        raise ValidationError({"employee": "No employee with this name"})
-                                elif key == "ActivityList":
-                                    try:
-                                        line[key] = parentModel.objects.get(program=line[key])
-                                    except:
-                                        raise ValidationError({"ActivityList": "Activity does not exist"})
-                                elif key == "dept":
-                                    try:
-                                        line[key] = parentModel.objects.get(dept_name=line[key])
-                                    except:
-                                        raise ValidationError({"dept": "Department does not exist"})
-                        #print(line)
-                        activity = line['ActivityList']
+                            elif isinstance(line[key], np.floating):
+                                line[key] = float(line[key])
 
-                        payType = activity.payType
-                        if payType == "special":
-                            employee = line['employee']
-                            item = employee.specialPayItem
-                        elif payType == "admin":
-                            employee = line['employee']
-                            item = employee.payItem
+                        # Match employee from Clockify User column
+                        clockifyUser = line["employee"]
+
+                        paidEmployee = getPayrollEmployeeFromClockifyName(clockifyUser)
+
+                        if not paidEmployee:
+                            raise ValidationError({
+                                "employee": f"No employee found for Clockify name '{clockifyUser}'"
+                            })
+
+                        line["employee"] = paidEmployee
+
+                        # Clockify project/paycode logic
+                        clockifyProject = str(line["clockify_project"]).strip()
+                        clockifyDepartment = str(line.get("clockify_department", "")).strip()
+
+                        paycode = getClockifyPaycode(clockifyProject)
+                        line["paycode"] = paycode
+
+                        if isLeaveClockifyProject(clockifyProject):
+                            activity = None
+                            line["ActivityList"] = None
+                            item = paidEmployee.payItem
+
                         else:
-                            item = activity.item
-                        
+                            activity = getActivityForClockifyRow(clockifyProject, clockifyDepartment)
 
-                        payRate = float(line['employee'].pay_rate)
-                        hours = line['hours']
-                        amount = payRate*hours
-                        user  = request.user
-                        try:
-                            employeeModel = apps.get_model('WCHDApp', "employee")
-                            employee = employeeModel.objects.get(user=user)
-                            #employeeEmail = employee.email
-                        except:
-                            raise ValidationError({"employee":"No employee with signed in user"})
+                            if not activity:
+                                cleanedProject = cleanClockifyProjectName(clockifyProject)
 
-                        try:
-                            paidEmployee = line['employee']
-                        except:
-                            raise ValidationError({"employee": "No employee with this name"})
-                        try:
-                            people = People.objects.get(name=line['employee'])
-                        except:
-                            raise ValidationError({"people":"No People object with this name"})
-                        
-                        #Need a full id in order to tell if we are trying to reenter lines
-                        expenseFullID = f"{paidEmployee.employee_id}-{activity.ActivityList_id}-{line["beg_date"]}-{line["startTime"]}"
-                        duplicate = Expense.objects.filter(expenseFullID=expenseFullID).exists()
-                        if duplicate == False:
-                            #Whether or not we entered a posting date
-                            if dateInputted == "":
-                                expense = Expense(
-                                    item=item,
-                                    amount=amount,
-                                    people=people,
-                                    warrant=1,
-                                    comment="Payroll",
-                                    ActivityList=activity,
-                                    line=item.line,
-                                    employee=employee,
-                                    expenseFullID=expenseFullID)
-                            else:
-                                expense = Expense(
-                                    item=item,
-                                    date=dateInputted,
-                                    amount=amount,
-                                    people=people,
-                                    warrant=1,
-                                    comment="Payroll",
-                                    ActivityList=activity,
-                                    line=item.line,
-                                    employee=employee,
-                                    expenseFullID=expenseFullID)
-                            try:
-                                expense.full_clean()
-                                expense.save()
-                                message = "Posted"
-                            except ValidationError as e:
-                                raise ValidationError(e)
-                                
-                        else:
-                            print("Expense already posted")
-                   
-                        #Deleting start time from dictionary because its not a value in our payroll object
-                        line.pop("startTime", None)
-                        obj, _ = model.objects.update_or_create(
-                            **line,
-                            defaults = line
+                                raise ValidationError({
+                                    "ActivityList": (
+                                        f"No ActivityList found for Clockify project '{clockifyProject}'. "
+                                        f"Cleaned name was '{cleanedProject}'. "
+                                        f"Clockify department was '{clockifyDepartment}'."
+                                    )
+                                })
+
+                            line["ActivityList"] = activity
+                            item = getPayrollItemForClockifyRow(
+                                paidEmployee,
+                                activity,
+                                clockifyProject
+                            )
+
+                        if not item:
+                            raise ValidationError({
+                                "item": f"No payroll item found for {paidEmployee}"
+                            })
+
+                        # Calculate amount
+                        payRate = Decimal(str(paidEmployee.pay_rate))
+                        hours = Decimal(str(line["hours"]))
+
+                        amount = payRate * hours
+                        amount = amount.quantize(
+                            Decimal("0.01"),
+                            rounding=ROUND_HALF_UP
                         )
+
+                        # Match People object
+                        people = getPeopleForEmployee(paidEmployee)
+
+                        # Activity ID cannot be used for leave rows because activity is None
+                        activityID = activity.ActivityList_id if activity else paycode
+
+                        expenseFullID = (
+                            f"{paidEmployee.employee_id}-"
+                            f"{activityID}-"
+                            f"{line['beg_date']}-"
+                            f"{line['startTime']}"
+                        )
+
+                        duplicate = Expense.objects.filter(
+                            expenseFullID=expenseFullID
+                        ).exists()
+
+                        if not duplicate:
+                            expenseDate = dateInputted if dateInputted else line["beg_date"]
+
+                            expense = Expense(
+                                item=item,
+                                date=expenseDate,
+                                amount=amount,
+                                people=people,
+                                warrant=1,
+                                comment="Payroll",
+                                ActivityList=activity,
+                                line=item.line,
+                                employee=paidEmployee,
+                                expenseFullID=expenseFullID
+                            )
+
+                            expense.full_clean()
+                            expense.save()
+
+                        # Payroll model does not have startTime
+                        line.pop("startTime", None)
+
+                        # Format payroll money/hours
+                        if "pay_amount" in line and line["pay_amount"] is not None:
+                            line["pay_amount"] = Decimal(str(line["pay_amount"])).quantize(
+                                Decimal("0.01"),
+                                rounding=ROUND_HALF_UP
+                            )
+
+                        if "hours" in line and line["hours"] is not None:
+                            line["hours"] = Decimal(str(line["hours"])).quantize(
+                                Decimal("0.01"),
+                                rounding=ROUND_HALF_UP
+                            )
+
+                        payrollModel.objects.update_or_create(
+                            employee=line["employee"],
+                            beg_date=line["beg_date"],
+                            end_date=line["end_date"],
+                            clockify_project=line["clockify_project"],
+                            hours=line["hours"],
+                            defaults=line
+                        )
+
+                    message = "Posted"
+
             except ValidationError as e:
-                #Setting messages for the frontend to the error messages from both view or model
                 message = e.message_dict
+
                 if message.get("warrant"):
                     message = message['warrant'][0]
                 elif message.get("item"):
@@ -1320,22 +2256,31 @@ def clockifyImportPayroll(request, *args, **kwargs):
                 elif message.get("amount"):
                     message = message['amount'][0]
                 elif message.get("comment"):
-                    message = message['comment'][0] 
+                    message = message['comment'][0]
                 elif message.get("ActivityList"):
                     message = message['ActivityList'][0]
                 elif message.get("people"):
-                    message = message['people'][0] 
+                    message = message['people'][0]
                 elif message.get("employee"):
                     message = message['employee'][0]
                 elif message.get("payperiod"):
                     message = message['payperiod'][0]
                 elif message.get("dept"):
                     message = message['dept'][0]
+                else:
+                    message = str(message)
+
+            except Exception as e:
+                message = f"Import failed: {e}"
+
     else:
         form = FileInput()
-    
-        
-    return render(request, "WCHDApp/clockifyImportPayroll.html", {"form": form, "message": message})
+
+    return render(
+        request,
+        "WCHDApp/clockifyImportPayroll.html",
+        {"form": form, "message": message}
+    )
 
 def calculateActivitySelect(request, *args, **kwargs):
     payrollModel = apps.get_model('WCHDApp', 'Payroll')
@@ -1413,7 +2358,6 @@ def getActivities(request):
     }
     return JsonResponse(data)
 
-@permission_required('WCHDApp.has_full_access', raise_exception=True)
 def payrollView(request, *args, **kwargs):
     payperiodModel = apps.get_model("WCHDApp", "PayPeriod")
     payperiods = payperiodModel.objects.all()
@@ -1552,7 +2496,6 @@ def employeeSummary(request):
 def transactionCustomView(request):
     return render(request, "WCHDApp/transactionCustomView.html")
 
-@permission_required('WCHDApp.has_full_access', raise_exception=True)
 def grantStats(request):
     grantModel = apps.get_model("WCHDApp", "Grant")
     grants = grantModel.objects.all()
@@ -1569,18 +2512,18 @@ def grantStats(request):
         totalSpent = 0
         totalRemaining = 0
         for grantLine in grantLines:
-            totalRemaining += grantLine.line_budget_remaining
-            totalSpent += grantLine.line_budget_spent
-            totalBudgeted += grantLine.line_budgeted
+            totalRemaining += float(grantLine.budgetRemaining)
+            totalSpent += float(grantLine.budgetSpent)
+            totalBudgeted += float(grantLine.line_budgeted)
 
         grantDict = {
             "grantID": grant.grant_id,
             "grantName": grant.grant_name,
-            "awardAmount": grant.award_amount,
-            "spent": totalSpent,
-            "remaining": totalRemaining,
-            "budgeted": totalBudgeted,
-            "received": grant.received
+            "awardAmount": f"${grant.award_amount:,.2f}",
+            "spent": f"${totalSpent:,.2f}",
+            "remaining": f"${totalRemaining:,.2f}",
+            "budgeted": f"${totalBudgeted:,.2f}",
+            "received": f"${grant.received:,.2f}",
         }
 
         grantList.append(grantDict)
@@ -1606,9 +2549,9 @@ def grantBreakdown(request):
         lineDict = {
             "lineName": line.line_name,
             "budgeted": line.line_budgeted,
-            "remaining": line.line_budget_remaining,
-            "spent": line.line_budget_spent,
-            "income":line.line_total_income
+            "remaining": line.budgetRemaining,
+            "spent": line.budgetSpent,
+            "income": line.totalIncome
         }
         linesList.append(lineDict)
 
@@ -1633,74 +2576,78 @@ def grantLineTableUpdate(request):
     message = ""
     grantID = request.GET.get("grant")
     grant = Grant.objects.get(pk=grantID)
-    
+
     grantLines = GrantLine.objects.filter(grant=grant)
 
-    #Getting just field names from model
     fields = GrantLine._meta.fields
 
-    #Lists to sort fields for styling
     fieldNames = []
     decimalFields = []
     aliasNames = []
 
     calculatedProperties = {
-        "Testing": [("fundBalanceMinus3", "Fund Balance Minus 3")],
-        "Benefits": [("pers", "Public Employee Retirement System"), ("medicare", "Medicare"),("wc", "Workers Comp"), ("plar", "Paid Leave Accumulation Rate"), ("vacation", "Vacation"), ("sick", "Sick Leave"), ("holiday", "Holiday Leave"), ("total_hrly", "Total Hourly Cost"), ("percent_leave", "Percent Leave"), ("monthly_hours", "Monthly Hours"), ("board_share_hrly", "Board Share Hourly"), ("life_hourly", "Life Hourly"), ("salary", "Salary"), ("fringes", "Fringes"), ("total_comp", "Total Compensation")],
-        "Payroll": [("pay_rate", "Pay Rate")],
-        "Fund":[("calcRemaining", "Remaining"), ("budgeted", "Budgeted")],
-        "Line": [("budgetRemaining", "Budget Remaining"), ("budgetSpent", "Budget Spent"), ("totalIncome", "Total Income")],
-        "GrantLine": [("budgetRemaining", "Budget Remaining"), ("budgetSpent", "Budget Spent"), ("totalIncome", "Total Income")]
-    }
-
-    #Fields that should be accumulated
-    summedFields = {
-        "Fund": "fund_cash_balance", 
-        "Line": "line_total_income",
-        "Transaction": "amount",
+        "GrantLine": [
+            ("budgetRemaining", "Budget Remaining"),
+            ("budgetSpent", "Budget Spent"),
+            ("totalIncome", "Total Income"),
+        ]
     }
 
     for field in fields:
         if isinstance(field, DecimalField):
-                decimalFields.append(field.name)
-        aliasNames.append(field.verbose_name)  
+            decimalFields.append(field.name)
+        aliasNames.append(field.verbose_name)
         fieldNames.append(field.name)
 
     if "GrantLine" in calculatedProperties:
-        for property in calculatedProperties["GrantLine"]:
-            #print(property)
-            aliasNames.append(property[1])
-            fieldNames.append(property[0])
-            decimalFields.append(property[0])
+        for prop_name, prop_label in calculatedProperties["GrantLine"]:
+            aliasNames.append(prop_label)
+            fieldNames.append(prop_name)
+            decimalFields.append(prop_name)
 
-    if request.method == 'POST':
+    if request.method == "POST":
         form = modelform_factory(GrantLine, exclude=["grant", "fund_year"])(request.POST)
         form.instance.grant = grant
         form.instance.fund_year = grant.fund.fund_id.split("-")[0]
+
         if form.is_valid():
-            line = form.save()
+            form.save()
             message = "Grant Line Created Successfully"
             form = modelform_factory(GrantLine, exclude=["grant", "fund_year"])()
         else:
             errors = form.errors
             if errors.get("line_budgeted"):
-                message = errors["line_budgeted"][0]     
+                message = errors["line_budgeted"][0]
             if errors.get("lineType"):
-                message = errors["lineType"][0]           
+                message = errors["lineType"][0]
     else:
         form = modelform_factory(GrantLine, exclude=["grant", "fund_year"])()
-    
+
     grantLines = GrantLine.objects.filter(grant=grant)
 
+    total_budget_remaining = Decimal("0.00")
+    total_budget_spent = Decimal("0.00")
+    total_income = Decimal("0.00")
+
+    for gl in grantLines:
+        total_budget_remaining += gl.budgetRemaining
+        total_budget_spent += gl.budgetSpent
+        total_income += gl.totalIncome
+
     context = {
-        "fields": fieldNames, 
-        "aliasNames": aliasNames, 
-        "data": grantLines, 
+        "fields": fieldNames,
+        "aliasNames": aliasNames,
+        "data": grantLines,
         "decimalFields": decimalFields,
         "form": form,
         "grant": grant,
         "message": message,
-        "grantAwardAmountRemaining":grant.grantAwardAmountRemaining
+        "grantAwardAmountRemaining": grant.grantAwardAmountRemaining,
+
+        # totals under the table
+        "total_budget_remaining": total_budget_remaining,
+        "total_budget_spent": total_budget_spent,
+        "total_income": total_income,
     }
 
     return render(request, "WCHDApp/partials/grantLineTableUpdate.html", context)
@@ -1733,13 +2680,12 @@ def testingGrantAccess(request):
     #making change
     return render(request, "WCHDApp/grantExpenseTesting.html", context)
 
-@permission_required('WCHDApp.has_full_access', raise_exception=True)
 def viewByYear(request):
     currentDate = datetime.now()
     year = currentDate.year
     years = list(range(2000, year+2))
 
-    models = ["Fund", "Line", "Item"]
+    models = ["Fund", "Line", "Item", "Revenue", "GrantLine", "Testing", "Payroll"]
 
     context = {
         "years": years,
@@ -1753,7 +2699,6 @@ def viewByYearPartial(request):
     #Any property that we define in models need to go here so our logic can include them in the table
     calculatedProperties = {
         "Testing": [("fundBalanceMinus3", "Fund Balance Minus 3")],
-        "Benefits": [("pers", "Public Employee Retirement System"), ("medicare", "Medicare"),("wc", "Workers Comp"), ("plar", "Paid Leave Accumulation Rate"), ("vacation", "Vacation"), ("sick", "Sick Leave"), ("holiday", "Holiday Leave"), ("total_hrly", "Total Hourly Cost"), ("percent_leave", "Percent Leave"), ("monthly_hours", "Monthly Hours"), ("board_share_hrly", "Board Share Hourly"), ("life_hourly", "Life Hourly"), ("salary", "Salary"), ("fringes", "Fringes"), ("total_comp", "Total Compensation")],
         "Payroll": [("pay_rate", "Pay Rate")],
         "Fund":[("calcRemaining", "Remaining")]
     }
@@ -1851,7 +2796,6 @@ def testingTableViewFunction(request, tableName):
     #Any property that we define in models need to go here so our logic can include them in the table
     calculatedProperties = {
         "Testing": [("fundBalanceMinus3", "Fund Balance Minus 3")],
-        "Benefits": [("pers", "Public Employee Retirement System"), ("medicare", "Medicare"),("wc", "Workers Comp"), ("plar", "Paid Leave Accumulation Rate"), ("vacation", "Vacation"), ("sick", "Sick Leave"), ("holiday", "Holiday Leave"), ("total_hrly", "Total Hourly Cost"), ("percent_leave", "Percent Leave"), ("monthly_hours", "Monthly Hours"), ("board_share_hrly", "Board Share Hourly"), ("life_hourly", "Life Hourly"), ("salary", "Salary"), ("fringes", "Fringes"), ("total_comp", "Total Compensation")],
         "Payroll": [("pay_rate", "Pay Rate")],
         "Fund":[("calcRemaining", "Remaining"), ("budgeted", "Budgeted")],
         "GrantLine": [("budgetRemaining", "Budget Remaining"), ("budgetSpent", "Budget Spent"), ("totalIncome", "Total Income")],
@@ -1902,3 +2846,717 @@ def updateRevenues(request):
         revenue.save()
     print("Updated")
     return render(request, "WCHDApp/testing.html")
+
+def projection_chart(request):
+
+    result = None
+    result_image = None
+    form = ProjectionCalcForm()
+    labels = None
+    values = None
+
+    if request.method == "POST":
+        form = ProjectionCalcForm(request.POST)
+        if form.is_valid():
+            employee_id = form.cleaned_data['employee_id']
+            employee = Employee.objects.get(employee_id=employee_id)
+            request.session["employee_id"] = employee.employee_id
+            salary = float(employee.pay_rate * 40 * 52)
+            workersComp = salary * float(0.01)
+            medicare = salary * float(0.0145)
+            opers = salary * float(0.14)
+            expense = salary + workersComp + medicare + opers
+            result = (
+                f"Estimated expense for this employee:\n"
+                f"Salary: ${salary:,.2f}\n"
+                f"OPERS: ${opers:,.2f}\n"
+                f"Medicare: ${medicare:,.2f}\n"
+                f"Workers Comp: ${workersComp:,.2f}\n"
+                f"Total: ${expense:,.2f}"
+            )
+
+            fig, ax = plt.subplots()
+
+            components = ["Salary", "OPERS", "Medicare", "Workers Comp"]
+            values = [salary, opers, medicare, workersComp]
+
+            colors = ["#4CAF50", "#2196F3", "#FF9800", "#F44336"]
+
+            bottom = 0
+            for i in range(len(values)):
+                ax.bar("Total Expense", values[i], bottom=bottom, label=components[i], color=colors[i])
+                bottom += values[i]
+
+            ax.set_title("Expense Breakdown")
+
+            def money(x, pos):
+                return f'${x:,.0f}'
+
+            ax.yaxis.set_major_formatter(FuncFormatter(money))
+            ax.legend()
+
+            buf = io.BytesIO()
+            plt.savefig(buf, format="png")
+            buf.seek(0)
+
+            image_base64 = base64.b64encode(buf.getvalue()).decode()
+
+            result_image = image_base64
+    else:
+        print("Invalid form submission")
+    return render(request, "WCHDApp/projections.html", {"form": form, "result": result, "labels": labels, "values": values, "result_image": result_image})
+
+# hello
+
+def projectionPage(request):
+    return render(request, "WCHDApp/projections.html")
+
+def insuranceAssignmentView(request):
+    return render(request, "WCHDApp/insuranceAssignmentView.html")
+
+def insuranceAssignmentTableUpdate(request):
+    message = ""
+
+    insuranceAssignmentModel = apps.get_model('WCHDApp', "InsuranceAssignment")
+    insuranceAssignmentValues = insuranceAssignmentModel.objects.all().order_by("year", "employee")
+
+    fields = [field for field in insuranceAssignmentModel._meta.fields if field.name != "id"]
+
+    fieldNames = []
+    decimalFields = []
+    aliasNames = []
+
+    for field in fields:
+        if isinstance(field, DecimalField):
+            decimalFields.append(field.name)
+        aliasNames.append(field.verbose_name)
+        fieldNames.append(field.name)
+
+    insuranceAssignmentForm = modelform_factory(
+        insuranceAssignmentModel,
+        exclude=[],
+        widgets={
+            "employee": forms.Select(attrs={"class": "searchable-select"}),
+        }
+    )
+
+    if request.method == "POST":
+        form = insuranceAssignmentForm(request.POST)
+        if form.is_valid():
+            form.save()
+            message = "Insurance assignment posted successfully"
+            form = insuranceAssignmentForm()
+            insuranceAssignmentValues = insuranceAssignmentModel.objects.all().order_by("year", "employee")
+        else:
+            message = "Please correct the errors below."
+    else:
+        form = insuranceAssignmentForm()
+
+    context = {
+        "fields": fieldNames,
+        "aliasNames": aliasNames,
+        "data": insuranceAssignmentValues,
+        "decimalFields": decimalFields,
+        "form": form,
+        "message": message,
+    }
+
+    return render(request, "WCHDApp/partials/insuranceAssignmentTablePartial.html", context)
+
+def insuranceHome(request):
+    return render(request, "WCHDApp/insuranceHome.html")
+
+def insurancePercentageView(request):
+    return render(request, "WCHDApp/insurancePercentageView.html")
+
+def insurancePercentageTableUpdate(request):
+    message = ""
+
+    insurancePercentageModel = apps.get_model('WCHDApp', "InsurancePercentage")
+    insurancePercentageValues = insurancePercentageModel.objects.all().order_by("start_date", "end_date", "employee", "fund")
+
+    fields = [field for field in insurancePercentageModel._meta.fields if field.name != "id"]
+
+    fieldNames = []
+    decimalFields = []
+    aliasNames = []
+
+    for field in fields:
+        if isinstance(field, DecimalField):
+            decimalFields.append(field.name)
+        aliasNames.append(field.verbose_name)
+        fieldNames.append(field.name)
+
+    insurancePercentageForm = modelform_factory(
+        insurancePercentageModel,
+        exclude=[],
+        widgets={
+            "person": forms.Select(attrs={"class": "searchable-select"}),
+            "fund": forms.Select(attrs={"class": "searchable-select"}),
+        }
+    )
+
+    if request.method == "POST":
+        form = insurancePercentageForm(request.POST)
+        if form.is_valid():
+            form.save()
+            message = "Insurance percentage posted successfully"
+            form = insurancePercentageForm()
+            insurancePercentageValues = insurancePercentageModel.objects.all().order_by("start_date", "end_date", "employee", "fund")
+        else:
+            message = "Please correct the errors below."
+    else:
+        form = insurancePercentageForm()
+
+    context = {
+        "fields": fieldNames,
+        "aliasNames": aliasNames,
+        "data": insurancePercentageValues,
+        "decimalFields": decimalFields,
+        "form": form,
+        "message": message,
+    }
+
+    return render(request, "WCHDApp/partials/insurancePercentageTablePartial.html", context)
+
+
+def getFundFromProject(projectName):
+    if not projectName:
+        return None
+
+    projectName = " ".join(str(projectName).strip().split())
+
+    activity = ActivityList.objects.filter(program__iexact=projectName).select_related("fund").first()
+    if activity:
+        return activity.fund
+
+    return None
+
+def getEmployeeFromClockifyName(userName):
+    if not userName:
+        return None
+
+    cleanedUserName = " ".join(str(userName).strip().split()).lower()
+
+    for employee in Employee.objects.all():
+        employeeName = f"{employee.first_name} {employee.surname}"
+        employeeName = " ".join(employeeName.strip().split()).lower()
+
+        if employeeName == cleanedUserName:
+            return employee
+
+    return None
+
+
+def getMonthDateRange(year, month):
+    lastDay = calendar.monthrange(year, month)[1]
+    monthStart = date(year, month, 1)
+    monthEnd = date(year, month, lastDay)
+    return monthStart, monthEnd
+
+
+def generateInsuranceAllocations(year, month):
+    monthStart, monthEnd = getMonthDateRange(year, month)
+
+    assignments = InsuranceAssignment.objects.filter(
+        year=year,
+        employee__isnull=False
+    ).select_related("employee")
+
+    for assignment in assignments:
+        employee = assignment.employee
+
+        percentageRows = InsurancePercentage.objects.filter(
+            employee=employee,
+            start_date__lte=monthEnd,
+            end_date__gte=monthStart,
+        ).select_related("fund")
+
+        for row in percentageRows:
+            multiplier = Decimal(str(row.percent_of_time)) / Decimal("100.00")
+
+            healthAmount = (assignment.health_rate * multiplier).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            dentalAmount = (assignment.dental_rate * multiplier).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            lifeAmount = (assignment.life_rate * multiplier).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+            InsuranceAllocation.objects.update_or_create(
+                year=year,
+                month=month,
+                employee=employee,
+                fund=row.fund,
+                defaults={
+                    "percent_of_time": row.percent_of_time,
+                    "health": healthAmount,
+                    "dental": dentalAmount,
+                    "life": lifeAmount,
+                }
+            )
+
+def rebuildInsuranceAllocations(year, month):
+    InsuranceAllocation.objects.filter(year=year, month=month).delete()
+    generateInsuranceAllocations(year, month)
+
+def processInsurancePercentageImport(selectedFile):
+    file = pd.read_csv(selectedFile)
+
+    requiredColumns = ["User", "Project", "Start Date", "End Date", "Duration (decimal)"]
+    missingColumns = [col for col in requiredColumns if col not in file.columns]
+
+    if missingColumns:
+        return False, f"Missing required columns: {', '.join(missingColumns)}"
+
+    grouped = defaultdict(lambda: {
+        "total_hours": Decimal("0.00"),
+        "fund_hours": defaultdict(lambda: Decimal("0.00")),
+        "start_date": None,
+        "end_date": None,
+        "employee": None,
+        "fund_objects": {},
+    })
+
+    skippedRows = []
+
+    for _, row in file.iterrows():
+        userName = row["User"]
+        projectName = row["Project"]
+        durationValue = row["Duration (decimal)"]
+
+        try:
+            startDate = pd.to_datetime(row["Start Date"]).date()
+            endDate = pd.to_datetime(row["End Date"]).date()
+            duration = Decimal(str(durationValue))
+        except Exception:
+            skippedRows.append(f"Bad date or duration for user {userName}, project {projectName}")
+            continue
+
+        employee = getEmployeeFromClockifyName(userName)
+        if not employee:
+            skippedRows.append(f"No employee match for user: {userName}")
+            continue
+
+        fund = getFundFromProject(projectName)
+        if not fund:
+            skippedRows.append(f"No fund match for project: {projectName}")
+            continue
+
+        employeeKey = employee.pk
+        grouped[employeeKey]["employee"] = employee
+        grouped[employeeKey]["total_hours"] += duration
+        grouped[employeeKey]["fund_hours"][fund.pk] += duration
+        grouped[employeeKey]["fund_objects"][fund.pk] = fund
+
+        if grouped[employeeKey]["start_date"] is None or startDate < grouped[employeeKey]["start_date"]:
+            grouped[employeeKey]["start_date"] = startDate
+
+        if grouped[employeeKey]["end_date"] is None or endDate > grouped[employeeKey]["end_date"]:
+            grouped[employeeKey]["end_date"] = endDate
+
+    createdCount = 0
+    allocationPeriods = set()
+
+    for _, info in grouped.items():
+        employee = info["employee"]
+        totalHours = info["total_hours"]
+        startDate = info["start_date"]
+        endDate = info["end_date"]
+
+        if totalHours == 0:
+            continue
+
+        if startDate:
+            allocationPeriods.add((startDate.year, startDate.month))
+        if endDate:
+            allocationPeriods.add((endDate.year, endDate.month))
+
+        for fundId, fundHours in info["fund_hours"].items():
+            fund = info["fund_objects"][fundId]
+            percent = (fundHours / totalHours) * Decimal("100.00")
+            percent = percent.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+            InsurancePercentage.objects.update_or_create(
+                employee=employee,
+                fund=fund,
+                start_date=startDate,
+                end_date=endDate,
+                defaults={
+                    "percent_of_time": percent,
+                }
+            )
+            createdCount += 1
+
+    for year, month in allocationPeriods:
+        rebuildInsuranceAllocations(year, month)
+
+    if skippedRows:
+        print("Skipped rows:")
+        for row in skippedRows:
+            print(row)
+        return True, f"Imported {createdCount} insurance percentage rows and updated insurance allocations. Some rows were skipped."
+
+    return True, f"Imported {createdCount} insurance percentage rows and updated insurance allocations successfully."
+
+def getFormattedFundCode(fund):
+    return f"{fund.year} {str(fund.fund_id).zfill(4)}"
+
+def getProgramNameFromFund(fund):
+    activity = ActivityList.objects.filter(fund=fund).order_by("program").first()
+    if activity:
+        return activity.program
+    return f"{fund.year} {str(fund.fund_id).zfill(4)}"
+
+def getInsuranceReportItem(fund):
+    item = Item.objects.filter(
+        fund=fund,
+        fund_year=fund.year,
+        item_name__iexact="Premium Payment"
+    ).select_related("line").first()
+
+    if item:
+        return item
+
+    return Item.objects.filter(
+        fund=fund,
+        fund_year=fund.year
+    ).select_related("line").first()
+
+def getInsuranceAmount(row, insuranceType):
+    if insuranceType == "health":
+        return row.health or Decimal("0.00")
+    if insuranceType == "dental":
+        return row.dental or Decimal("0.00")
+    return (row.health or Decimal("0.00")) + (row.dental or Decimal("0.00"))
+
+def buildInsuranceByFund(year, month, insuranceType):
+    allocations = InsuranceAllocation.objects.filter(
+        year=year,
+        month=month
+    ).select_related("fund", "employee").order_by("fund", "employee")
+
+    grouped = defaultdict(lambda: {
+        "fund": None,
+        "fund_code": "",
+        "premium_payment": Decimal("0.00"),
+        "budget_available": Decimal("0.00"),
+        "cash_balance": Decimal("0.00"),
+        "rows": [],
+    })
+
+    for row in allocations:
+        fund = row.fund
+        fundId = fund.pk
+        rowTotal = getInsuranceAmount(row, insuranceType)
+
+        item = getInsuranceReportItem(fund)
+        line = item.line if item else None
+
+        grouped[fundId]["fund"] = fund
+        grouped[fundId]["fund_code"] = f"{fund.year} {str(fund.fund_id).zfill(4)}"
+        grouped[fundId]["premium_payment"] += rowTotal
+        grouped[fundId]["cash_balance"] = fund.fund_cash_balance
+
+        if line:
+            grouped[fundId]["budget_available"] = line.budgetRemaining
+
+        grouped[fundId]["rows"].append({
+            "employee": str(row.employee),
+            "total": rowTotal,
+        })
+
+    return list(grouped.values())
+
+
+def buildInsuranceByEmployee(year, month, insuranceType):
+    allocations = InsuranceAllocation.objects.filter(
+        year=year,
+        month=month
+    ).select_related("fund", "employee").order_by("employee", "fund")
+
+    grouped = defaultdict(lambda: {
+        "employee": None,
+        "grand_total": Decimal("0.00"),
+        "rows": [],
+    })
+
+    for row in allocations:
+        rowTotal = getInsuranceAmount(row, insuranceType)
+        employeeId = row.employee.pk
+
+        grouped[employeeId]["employee"] = str(row.employee)
+        grouped[employeeId]["grand_total"] += rowTotal
+        grouped[employeeId]["rows"].append({
+            "program": getProgramNameFromFund(row.fund),
+            "total": rowTotal,
+        })
+
+    return list(grouped.values())
+
+
+def buildInsuranceForTrena(year, month, insuranceType):
+    allocations = InsuranceAllocation.objects.filter(
+        year=year,
+        month=month
+    ).select_related("fund")
+
+    grouped = defaultdict(lambda: {
+        "fund": None,
+        "fund_code": "",
+        "premium_payment": Decimal("0.00"),
+        "budget_available": Decimal("0.00"),
+        "cash_balance": Decimal("0.00"),
+    })
+
+    for row in allocations:
+        fund = row.fund
+        fundId = fund.pk
+        rowTotal = getInsuranceAmount(row, insuranceType)
+
+        item = getInsuranceReportItem(fund)
+        line = item.line if item else None
+
+        grouped[fundId]["fund"] = fund
+        grouped[fundId]["fund_code"] = f"{fund.year} {str(fund.fund_id).zfill(4)}"
+        grouped[fundId]["premium_payment"] += rowTotal
+        grouped[fundId]["cash_balance"] = fund.fund_cash_balance
+
+        if line:
+            grouped[fundId]["budget_available"] = line.budgetRemaining
+
+    return list(grouped.values())
+
+@permission_required('WCHDApp.has_full_access', raise_exception=True)
+def insuranceReports(request):
+    allocationYears = list(
+        InsuranceAllocation.objects.order_by("year")
+        .values_list("year", flat=True)
+        .distinct()
+    )
+
+    assignmentYears = list(
+        InsuranceAssignment.objects.order_by("year")
+        .values_list("year", flat=True)
+        .distinct()
+    )
+
+    availableYears = sorted(set(allocationYears + assignmentYears))
+    if not availableYears:
+        availableYears = [date.today().year]
+
+    context = {
+        "availableYears": availableYears,
+        "months": [
+            (1, "January"), (2, "February"), (3, "March"), (4, "April"),
+            (5, "May"), (6, "June"), (7, "July"), (8, "August"),
+            (9, "September"), (10, "October"), (11, "November"), (12, "December"),
+        ]
+    }
+
+    if request.method == "POST":
+        year = int(request.POST.get("year"))
+        month = int(request.POST.get("month"))
+        reportType = request.POST.get("report_type")
+        insuranceType = request.POST.get("insurance_type")
+
+        return redirect("insuranceReportsPDF", year=year, month=month, report_type=reportType, insurance_type=insuranceType)
+
+    return render(request, "WCHDApp/insuranceReports.html", context)
+
+@permission_required('WCHDApp.has_full_access', raise_exception=True)
+def insuranceReportsPDF(request, year, month, report_type, insurance_type):
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=landscape(letter))
+    elements = []
+    styles = getSampleStyleSheet()
+
+    title_style = ParagraphStyle(
+        "TitleStyle",
+        parent=styles["Title"],
+        fontSize=16,
+        spaceAfter=11,
+        fontName="Helvetica-Bold"
+    )
+
+    table_text_style = ParagraphStyle(
+        "TableText",
+        parent=styles["Normal"],
+        fontSize=7,
+        leading=8,
+        wordWrap='CJK',
+        alignment=0
+    )
+
+    header_style = ParagraphStyle(
+        "HeaderStyle",
+        parent=styles["Normal"],
+        fontSize=7,
+        leading=8,
+        alignment=1,
+        fontName="Helvetica-Bold"
+    )
+
+    if insurance_type not in ["health", "dental", "all"]:
+        insurance_type = "all"
+    if insurance_type == "health":
+        insuranceLabel = "Health Insurance"
+    elif insurance_type == "dental":
+        insuranceLabel = "Dental Insurance"
+    else:
+        insuranceLabel = "Health and Dental Insurance"
+
+    elements.append(Spacer(1, 12))
+    elements.append(Paragraph("Washington County Health Department", title_style))
+    elements.append(Paragraph(f"{insuranceLabel} for {month:02d}/{year}", styles["Heading2"]))
+    elements.append(Spacer(1, 10))
+
+
+    if report_type == "fund":
+        reportData = buildInsuranceByFund(year, month, insurance_type)
+
+        for group in reportData:
+            elements.append(
+                Paragraph(
+                    f"<b>Fund {group['fund_code']}</b> &nbsp;&nbsp; "
+                    f"<b>Premium Payment:</b> ${group['premium_payment']:,.2f} &nbsp;&nbsp; "
+                    f"<b>Budget Available:</b> ${group['budget_available']:,.2f} &nbsp;&nbsp; "
+                    f"<b>Cash Balance:</b> ${group['cash_balance']:,.2f}",
+                    styles["Normal"]
+                )
+            )
+            elements.append(Spacer(1, 6))
+
+            data = [[
+                Paragraph("Employee", header_style),
+                Paragraph("Total Insurance", header_style),
+            ]]
+
+            for row in group["rows"]:
+                data.append([
+                    Paragraph(row["employee"], table_text_style),
+                    Paragraph(f'${row["total"]:,.2f}', table_text_style),
+                ])
+
+            table = Table(data, colWidths=[4.5*inch, 2.0*inch])
+            table.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (-1, 0), colors.darkgray),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                ("GRID", (0, 0), (-1, -1), 1, colors.black),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("BACKGROUND", (0, 1), (-1, -1), colors.whitesmoke),
+            ]))
+            elements.append(table)
+            elements.append(Spacer(1, 12))
+
+        filename = f"insurance_by_fund_{year}_{month:02d}.pdf"
+
+    elif report_type == "employee":
+        reportData = buildInsuranceByEmployee(year, month, insurance_type)
+
+        for group in reportData:
+            elements.append(Paragraph(f"<b>{group['employee']}</b>", styles["Normal"]))
+            elements.append(Spacer(1, 6))
+
+            data = [[
+                Paragraph("Program", header_style),
+                Paragraph("Total Insurance", header_style),
+            ]]
+
+            for row in group["rows"]:
+                data.append([
+                    Paragraph(row["program"], table_text_style),
+                    Paragraph(f'${row["total"]:,.2f}', table_text_style),
+                ])
+
+            data.append([
+                Paragraph("Grand Total", header_style),
+                Paragraph(f'${group["grand_total"]:,.2f}', header_style),
+            ])
+
+            table = Table(data, colWidths=[4.5*inch, 2.0*inch])
+            table.setStyle(TableStyle([
+                ("BACKGROUND", (0, 0), (-1, 0), colors.darkgray),
+                ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+                ("GRID", (0, 0), (-1, -1), 1, colors.black),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("BACKGROUND", (0, 1), (-1, -2), colors.whitesmoke),
+                ("BACKGROUND", (0, -1), (-1, -1), colors.lightgrey),
+            ]))
+            elements.append(table)
+            elements.append(Spacer(1, 12))
+
+        filename = f"insurance_by_employee_{year}_{month:02d}.pdf"
+
+    else:
+        reportData = buildInsuranceForTrena(year, month, insurance_type)
+
+        data = [[
+            Paragraph("Fund", header_style),
+            Paragraph("Premium Payment", header_style),
+            Paragraph("Budget Available", header_style),
+            Paragraph("Cash Balance", header_style),
+        ]]
+
+        for group in reportData:
+            data.append([
+                Paragraph(group["fund_code"], table_text_style),
+                Paragraph(f'${group["premium_payment"]:,.2f}', table_text_style),
+                Paragraph(f'${group["budget_available"]:,.2f}', table_text_style),
+                Paragraph(f'${group["cash_balance"]:,.2f}', table_text_style),
+            ])
+
+        table = Table(data, colWidths=[1.5*inch, 1.8*inch, 1.8*inch, 1.8*inch])
+        table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.darkgray),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("GRID", (0, 0), (-1, -1), 1, colors.black),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("BACKGROUND", (0, 1), (-1, -1), colors.whitesmoke),
+        ]))
+        elements.append(table)
+
+        filename = f"insurance_for_auditor_{year}_{month:02d}.pdf"
+
+        elements.append(Paragraph("340 Muskingum Dr, Suite B, Marietta OH 45750"))
+
+    doc.build(elements)
+
+    buffer.seek(0)
+    pdf_data = buffer.getvalue()
+    buffer.close()
+
+    response = HttpResponse(pdf_data, content_type="application/pdf")
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return response
+
+@staff_member_required
+def downloadAdminLog(request):
+    response = HttpResponse(content_type="text/csv")
+    response["Content-Disposition"] = 'attachment; filename="admin_recent_actions.csv"'
+
+    writer = csv.writer(response)
+
+    writer.writerow([
+        "Action Time",
+        "User",
+        "Action",
+        "Model",
+        "Object",
+        "Object ID",
+        "Change Message",
+    ])
+
+    logs = LogEntry.objects.select_related(
+        "user",
+        "content_type"
+    ).order_by("-action_time")
+
+    for log in logs:
+        writer.writerow([
+            log.action_time,
+            log.user.username if log.user else "",
+            log.get_action_flag_display(),
+            log.content_type.model if log.content_type else "",
+            log.object_repr,
+            log.object_id,
+            log.change_message,
+        ])
+
+    return response

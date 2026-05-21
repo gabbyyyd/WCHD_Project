@@ -20,19 +20,31 @@ class LineForm(forms.ModelForm):
 
 #Index Form/ Normal form that gives a drop down of tables included in models.py. 
 class TableSelect(forms.Form):
-    #Pulling models
-    models = apps.get_app_config('WCHDApp').get_models()
-    modelsDict= {}
-    for model in models:
-        modelsDict[model.__name__] = model.__name__
-    table = forms.ChoiceField(choices=modelsDict, label="Select Table", required=True,  widget=forms.Select(attrs={'class': 'searchable-select'}))
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        models = apps.get_app_config('WCHDApp').get_models()
+
+        # Sort models alphabetically by model name
+        sorted_models = sorted(models, key=lambda m: m.__name__)
+
+        choices = [(model.__name__, model._meta.verbose_name.title()) for model in sorted_models]
+
+        self.fields['table'] = forms.ChoiceField(
+            choices=choices,
+            label="Select Table",
+            required=True,
+            widget=forms.Select(attrs={'class': 'searchable-select'})
+        )
+
 
 class InputSelect(forms.Form):
     #Pulling models
     models = apps.get_app_config('WCHDApp').get_models()
     modelsDict= {}
     for model in models:
-        modelsDict[model.__name__] = model.__name__
+        modelsDict[model.__name__] = model._meta.verbose_name.title()
     
     table = forms.ChoiceField(choices=modelsDict, label="Select Table", required=True)
     file = forms.FileField(
@@ -53,10 +65,14 @@ class ExportSelect(forms.Form):
     models = apps.get_app_config('WCHDApp').get_models()
     modelsDict= {}
     for model in models:
-        modelsDict[model.__name__] = model.__name__
+        modelsDict[model.__name__] = model._meta.verbose_name.title()
     
     table = forms.ChoiceField(choices=modelsDict, label="Select Table", required=True)
     fileName = forms.CharField(max_length=20, label="File Name (do not include .csv)", required=True)
+
+    #Optional Date Filtering
+    start_date = forms.DateField(label="Start Date (Optional)", required=False, widget=forms.DateInput(attrs={'type': 'date'}))
+    end_date = forms.DateField(label="End Date (Optional)", required=False, widget=forms.DateInput(attrs={'type': 'date'}))
 
     
 
@@ -73,12 +89,12 @@ class ExportSelect(forms.Form):
 class reconcileForm(forms.Form):
     firstFile = forms.FileField(
         label="Upload First CSV File",
-        required=False,
+        required=True,
         widget=forms.ClearableFileInput(attrs={'accept': '.csv'})
     )
     secondFile = forms.FileField(
         label="Upload Second CSV File",
-        required=False,
+        required=True,
         widget=forms.ClearableFileInput(attrs={'accept': '.csv'})
     )
    
@@ -103,5 +119,7 @@ class ModelSelectForm(forms.Form):
         modelsDict[model.__name__] = model.__name__
     table = forms.ChoiceField(choices=modelsDict, label="Select Table", required=True,  widget=forms.Select(attrs={'class': 'searchable-select'}))
     
+class ProjectionCalcForm(forms.Form):
     
+    employee_id = forms.FloatField(label="Enter Employee ID:", required=True)
     

@@ -1,0 +1,34 @@
+{% extends "WCHDApp/masterTemplate.html" %}
+{% load static %}
+
+{% block title %}Insurance{% endblock %}
+
+{% block content %}
+<link rel="stylesheet" type="text/css" href="{% static 'WCHDApp/css/hubStyles.css' %}">
+
+<h1 style="text-align: center;">WCHD Insurance</h1>
+
+<div style="display: flex; justify-content: center; margin-top: 30px;">
+    <div style="
+        border: 1px solid #ccc;
+        border-radius: 12px;
+        padding: 20px;
+        display: inline-block;
+        background-color: white;
+    ">
+        <div class="container" style="
+            display: flex;
+            flex-wrap: nowrap;
+            gap: 20px;
+            justify-content: center;
+            align-items: center;
+            margin: 0;
+        ">
+            <div class="box"><a href="{% url 'insuranceAssignmentView' %}">Insurance Assignments</a></div>
+            <div class="box"><a href="{% url 'insurancePercentageView' %}">Insurance Percentages</a></div>
+            <div class="box"><a href="{% url 'tableView' 'InsuranceAllocation' %}">Insurance Allocations</a></div>
+            <div class="box"><a href="{% url 'insuranceReports' %}">Insurance Reports</a></div>
+        </div>
+    </div>
+</div>
+{% endblock %}

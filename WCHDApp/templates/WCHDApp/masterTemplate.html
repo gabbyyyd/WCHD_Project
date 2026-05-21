@@ -8,7 +8,6 @@
     <link rel="stylesheet" type="text/css" href="{% static 'WCHDApp/css/masterStyling.css' %}"> 
     <script src="https://unpkg.com/htmx.org@1.9.5"></script>
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-
     <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
 </head>
 <body>
@@ -16,19 +15,20 @@
         <ul>
             <li><a href="{% url 'index' %}">Home</a></li>
             <li><a href="{% url 'viewTableSelect' %}">Table View Select</a></li>
-            <li><a href="{% url 'reports' %}">Reports</a></li>
             <li><a href="{% url 'imports' %}">Imports</a></li>
             <li><a href="{% url 'exports' %}">Exports</a></li>
             <li><a href="{% url 'transactionsItem' %}">Transactions</a></li>
             <li><a href="{% url 'reconcile' %}">Reconcile</a></li>
             <li><a href="{% url 'grantStats' %}">Grant Stats</a></li>
-            <!--No longer using these and will redirect in our normal view-->
-            <!--<li><a href="{% url 'calculateActivitySelect' %}">Clockify View</a></li>-->
+            <li><a href="{% url 'viewByYear' %}">New Year Creation</a></li>
+            <li><a href="{% url 'insuranceHome' %}">Insurance</a></li>
+            {% if request.user.is_staff %}
+                <li><a href="{% url 'downloadAdminLog' %}">Download Admin Actions</a></li>
+            {% endif %}
         </ul>
     </nav>
     <main>
         {% block content %}
-
         {% endblock %}
     </main>
 </body>

@@ -1,27 +1,91 @@
 {% load static %}
 {% load custom_filters %}
+<link rel="stylesheet" href="{% static 'WCHDApp/css/cleanPages.css' %}">
+<link rel="stylesheet" href="{% static 'WCHDApp/css/themes.css' %}">
+
 <div id="tableAndForm">
-    <table border="1">
-        <tr>
-            {% for field in aliasNames%}
-                <th>{{field}}</th>
-            {% endfor%}
-        </tr>
-        {% for row in data%}
-            <tr>
-            {% for field in fields%}
-                {% if field in decimalFields %}
-                    <td style="text-align: right;">{{row|get_attr:field}}</td>
-                {% else %}
-                    <td>{{row|get_attr:field}}</td>
-                {% endif %}
-            {% endfor%}
-            </tr>
-        {% endfor %}
-    </table>
-    
-    <h3>Accumulator:</h3>
-    
+
+    <!-- method="GET" action="{% url 'transactionsView' %}" class="mb-3"-->
+
+    <form hx-get="{% url 'transactionsView' %}"
+        hx-target="#tableAndForm"
+        hx-swap="outerHTML">
+        
+        <input type="hidden" name="itemSelect" value = "{{ itemObj.item_id }}">
+        <label>Start Date:</label>
+        <input type="date" name="start_date" value="{{ request.GET.start_date }}">
+        <label>End Date:</label>
+        <input type="date" name="end_date" value="{{ request.GET.end_date }}">
+
+        <label>Sort By:</label>
+    <select 
+        name="sort_by" 
+        hx-trigger="change"
+        hx-get="{% url 'transactionsView' %}"
+        hx-target="#tableAndForm"
+        hx-swap="outerHTML"
+    >
+        <option value="">Default</option>
+        <option value="date" {% if request.GET.sort_by == "date" %}selected{% endif %}>Date (Oldest)</option>
+        <option value="-date" {% if request.GET.sort_by == "-date" %}selected{% endif %}>Date (Newest)</option>
+        <option value="amount" {% if request.GET.sort_by == "amount" %}selected{% endif %}>Amount (Low → High)</option>
+        <option value="-amount" {% if request.GET.sort_by == "-amount" %}selected{% endif %}>Amount (High → Low)</option>
+        <option value="payType" {% if request.GET.sort_by == "payType" %}selected{% endif %}>Payment Type (Alphabetical)</option>
+        <option value="-payType" {% if request.GET.sort_by == "-payType" %}selected{% endif %}>Payment Type (Reverse Alphabetical)</option>
+        <option value="item" {% if request.GET.sort_by == "item" %}selected{% endif %}>Item (Alphabetical)</option>
+        <option value="-item" {% if request.GET.sort_by == "-item" %}selected{% endif %}>Item (Reverse Alphabetical)</option>
+    </select>
+    <button type="submit">Filter</button>
+    </form>
+    <form method="GET" action="{% url 'generate_pdf' 'revenue' %}">
+
+        <div class="table-container">
+            <table border="1">
+                <tr>
+                    <th>Select</th>
+                    {% for field in aliasNames %}
+                        <th>{{ field }}</th>
+                    {% endfor %}
+                </tr>
+
+                {% for row in data %}
+                    <tr>
+                        <td>
+                            <input type="checkbox" name="selected_rows" value="{{ row.id }}">
+                        </td>
+                        
+                        {% for field in fields %}
+                            {% if field == "payType" %}
+                                <td>{{ row.get_payType_display }}</td>
+
+                            {% elif field in decimalFields %}
+                                <td style="text-align: right;">{{ row|get_attr:field }}</td>
+
+                            {% else %}
+                                <td>{{ row|get_attr:field }}</td>
+                            {% endif %}
+                        {% endfor %}
+                    </tr>
+                {% endfor %}
+            </table>
+        </div>
+
+        <input type="hidden" name="item" value="{{ itemObj.item_id }}">
+
+        <div style="display: flex; align-items: center; margin-top: 10px; margin-bottom: 20px;">
+            
+            <h3 style="margin: 0;">
+                Total Revenue: {{ accumulator | money }}
+            </h3>
+
+            <button type="submit" class="pdf-button" style="margin-left: auto;">
+                Download Selected PDF
+            </button>
+
+        </div>
+
+    </form>
+
     <div class="FormContainer">
         <form
             method="POST"
@@ -57,9 +121,40 @@
     </div>
 </div>
 
+<style>
+.pdf-button-wrapper {
+    margin-top: 20px;
+    display: flex;
+    justify-content: flex-end; /* push to right */
+}
+
+.pdf-button {
+    font-size: 15px;
+    padding: 12px 20px;
+    border-radius: 8px;
+    background: linear-gradient(135deg, #007bff, #00c6ff);
+    color: white;
+    border: none;
+    cursor: pointer;
+    font-weight: 600;
+    box-shadow: 0 3px 8px rgba(0,0,0,0.15);
+    transition: all 0.2s ease;
+}
+
+.pdf-button:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 5px 12px rgba(0,0,0,0.2);
+}
+
+.pdf-button:active {
+    transform: scale(0.97);
+}
+</style>
+</div>
 <!-- Init Select2 -->
 <script>
     $(document).ready(function() {
         $('.searchable-select').select2();
     });
 </script>
+

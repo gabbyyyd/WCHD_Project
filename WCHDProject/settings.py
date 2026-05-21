@@ -31,7 +31,12 @@ SECRET_KEY = os.getenv('DJANGO_SECRET_KEY')
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = bool(os.getenv("DEBUG", "0") == "True")
 
-ALLOWED_HOSTS = os.getenv("DJANGO_ALLOWED_HOSTS", "127.0.0.1").split(",")
+#For Development
+# ALLOWED_HOSTS = os.getenv("DJANGO_ALLOWED_HOSTS", "127.0.0.1").split(",")
+
+#For production
+# Later change ALLOWED_HOSTS ["WCHDProject.onrender.com"]
+ALLOWED_HOSTS = ["*"]
 
 # Application definition
 
@@ -81,7 +86,9 @@ WSGI_APPLICATION = 'WCHDProject.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/5.1/ref/settings/#databases
 
-"""DATABASES = {
+#Used this for Production, maybe
+"""
+DATABASES = {
     'default': {
         'ENGINE': os.getenv('DATABASE_ENGINE'),
         'NAME': os.getenv('DATABASE_NAME'),
@@ -90,17 +97,25 @@ WSGI_APPLICATION = 'WCHDProject.wsgi.application'
         'HOST': os.getenv('DATABASE_HOST', 'localhost'),  # or your database server's address
         'PORT': os.getenv('DATABASE_PORT'),  # Default PostgreSQL port
     }
-}"""
-
-
+}
+"""
+#Used this for Development
+"""
 DATABASES = {
     'default': dj_database_url.config(
         default=os.environ.get('DATABASE_URL'),
         
     )
 }
-
-
+"""
+#Render for Production
+DATABASES = {
+    "default":
+    dj_database_url.parse(
+        os.environ.get("DATABASE_URL",
+         "")
+    )
+}
 
 
 

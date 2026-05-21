@@ -20,9 +20,10 @@
             </tr>
         {% endfor %}
     </table>
-    <h3>Remaining Available Budget: {{grantAwardAmountRemaining|money}}</h3>
-    <h3>Accumulator:</h3>
-    
+    <h3>Total Budget Remaining: {{ total_budget_remaining|money }}</h3>
+    <h3>Total Budget Spent: {{ total_budget_spent|money }}</h3>
+    <h3>Total Income: {{ total_income|money }}</h3>
+        
     <div class="FormContainer">
         <form
             method="POST"

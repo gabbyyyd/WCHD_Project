@@ -3,7 +3,7 @@ services:
     name: django-app
     env: docker
     plan: free
-    region: oregon
+    region: ohio
     dockerContext: .
     dockerfilePath: ./Dockerfile
     envVars:

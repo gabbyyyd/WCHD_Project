@@ -1,0 +1,63 @@
+{% extends "WCHDApp/masterTemplate.html" %}
+{% load static %}
+
+{% block title %}Insurance Reports{% endblock %}
+
+{% block content %}
+    <link rel="stylesheet" type="text/css" href="{% static 'WCHDApp/css/formStyling.css' %}">
+    <link rel="stylesheet" type="text/css" href="{% static 'WCHDApp/css/cleanPages.css' %}">
+    <link rel="stylesheet" type="text/css" href="{% static 'WCHDApp/css/themes.css' %}">
+    
+
+    <h1>Insurance Reports</h1>
+
+    <div class="cleanPageContainer">
+        <div class="formBox">
+            <form method="POST">
+                {% csrf_token %}
+
+                <div class="FormGroup">
+                    <label for="year">Year</label>
+                    <select name="year" id="year" required>
+                        <option value="">Select Year</option>
+                        {% for y in availableYears %}
+                            <option value="{{ y }}">{{ y }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="FormGroup">
+                    <label for="month">Month</label>
+                    <select name="month" id="month" required>
+                        <option value="">Select Month</option>
+                        {% for monthNum, monthName in months %}
+                            <option value="{{ monthNum }}">{{ monthName }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="FormGroup">
+                    <label for="report_type">Report Type</label>
+                    <select name="report_type" id="report_type" required>
+                        <option value="">Select Report</option>
+                        <option value="fund">By Fund</option>
+                        <option value="employee">By Employee</option>
+                        <option value="trena">For Auditor</option>
+                    </select>
+                </div>
+
+                <div class="FormGroup">
+                    <label for="insurance_type">Insurance Type</label>
+                    <select name="insurance_type" id="insurance_type" required>
+                        <option value="">Select Type</option>
+                        <option value="all">Health and Dental</option>
+                        <option value="health">Health</option>
+                        <option value="dental">Dental</option>
+                    </select>
+                </div>
+
+                <button type="submit" class="cleanPageButton">Download PDF</button>
+            </form>
+        </div>
+    </div>
+{% endblock %}

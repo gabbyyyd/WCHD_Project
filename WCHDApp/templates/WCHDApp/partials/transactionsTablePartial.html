@@ -1,59 +1,139 @@
 {% load static %}
 {% load custom_filters %}
+
 <div id="tableAndForm">
 
-    <table border="1">
-        <tr>
-            {% for field in aliasNames%}
-            <th>{{field}}</th>
-            {% endfor%}
-        </tr>
-        {% for row in data%}
-        <tr>
-            {% for field in fields%}
-            {% if field in decimalFields %}
-            <td style="text-align: right;">{{row|get_attr:field}}</td>
-            {% else %}
-            <td>{{row|get_attr:field}}</td>
-            {% endif %}
-            {% endfor%}
-        </tr>
-        {% endfor %}
-    </table>
-    <h3>Remaining Available Budget: {{budgeted_remaining|money}}</h3>
-    <h3>Accumulator:</h3>
+    <form 
+        hx-get="{% url 'transactionsExpenseTableUpdate' %}"
+        hx-target="#tableAndForm"
+        hx-swap="outerHTML"
+    >
+        <input type="hidden" name="item" value="{{ item.item_id }}">
+
+        <label>Start Date:</label>
+        <input type="date" name="start_date" value="{{ request.GET.start_date }}">
+
+        <label>End Date:</label>
+        <input type="date" name="end_date" value="{{ request.GET.end_date }}">
+
+        <label>Sort By:</label>
+        <select 
+            name="sort_by"
+            hx-trigger="change"
+            hx-get="{% url 'transactionsExpenseTableUpdate' %}"
+            hx-target="#tableAndForm"
+            hx-swap="outerHTML"
+            hx-include="closest form"
+        >
+            <option value="">Default</option>
+
+            <option value="date" {% if request.GET.sort_by == "date" %}selected{% endif %}>
+                Date (Oldest)
+            </option>
+
+            <option value="-date" {% if request.GET.sort_by == "-date" %}selected{% endif %}>
+                Date (Newest)
+            </option>
+
+            <option value="amount" {% if request.GET.sort_by == "amount" %}selected{% endif %}>
+                Amount (Low → High)
+            </option>
+
+            <option value="-amount" {% if request.GET.sort_by == "-amount" %}selected{% endif %}>
+                Amount (High → Low)
+            </option>
+
+            <option value="people" {% if request.GET.sort_by == "people" %}selected{% endif %}>
+                Person/Company
+            </option>
+
+            <option value="-people" {% if request.GET.sort_by == "-people" %}selected{% endif %}>
+                Person/Company Reverse
+            </option>
+
+            <option value="employee" {% if request.GET.sort_by == "employee" %}selected{% endif %}>
+                Employee
+            </option>
+
+            <option value="-employee" {% if request.GET.sort_by == "-employee" %}selected{% endif %}>
+                Employee Reverse
+            </option>
+        </select>
+
+        <button type="submit">Filter</button>
+    </form>
+
+    <br>
+
+    <div class="table-container expense-table-container">
+        <table border="1">
+            <tr>
+                {% for field in aliasNames %}
+                    <th>{{ field }}</th>
+                {% endfor %}
+            </tr>
+
+            {% for row in data %}
+                <tr>
+                    {% for field in fields %}
+                        {% if field in decimalFields %}
+                            <td style="text-align: right;">{{ row|get_attr:field }}</td>
+                        {% else %}
+                            <td>{{ row|get_attr:field }}</td>
+                        {% endif %}
+                    {% endfor %}
+                </tr>
+            {% empty %}
+                <tr>
+                    <td colspan="{{ fields|length }}">No expenses found.</td>
+                </tr>
+            {% endfor %}
+        </table>
+    </div>
+
+    <h3>Remaining Available Budget: {{ budgeted_remaining|money }}</h3>
+    <h3>Total Spent: {{ accumulator|money }}</h3>
 
     <div class="FormContainer">
-        <form method="POST" hx-post="{% url 'transactionsExpenseTableUpdate' %}?item={{ item.item_id }}"
-            hx-target="#tableAndForm" hx-swap="outerHTML">
+        <form 
+            method="POST" 
+            hx-post="{% url 'transactionsExpenseTableUpdate' %}?item={{ item.item_id }}"
+            hx-target="#tableAndForm" 
+            hx-swap="outerHTML"
+        >
             {% csrf_token %}
+
             {% for field in form %}
+                <div class="FormGroup">
+                    {{ field.label_tag }}
+                    {{ field }}
+                </div>
 
-            <div class="FormGroup">
-                {{ field.label_tag }}
-                {{ field }}
-            </div>
+                {% if field.name == "people" %}
+                    <div>
+                        <a 
+                            hx-get="{% url 'addPeopleForm' %}" 
+                            hx-target="#peopleForm" 
+                            hx-swap="innerHTML"
+                            hx-vals='{"itemID": "{{ item.item_id }}", "source":"expense"}'
+                        >
+                            + Add Person/Company
+                        </a>
+                    </div>
 
-            {% if field.name == "people" %}
-            <div>
-                <a hx-get="{% url 'addPeopleForm' %}" hx-target="#peopleForm" hx-swap="innerHTML"
-                    hx-vals='{"itemID": "{{ item }}", "source":"expense"}'>
-                    + Add Person/Company</a>
-            </div>
-            <div id="peopleForm"></div>
-            {% endif %}
-
+                    <div id="peopleForm"></div>
+                {% endif %}
             {% endfor %}
+
             <button type="submit">Submit</button>
-            <p>{{message}}</p>
+            <p>{{ message }}</p>
         </form>
     </div>
 </div>
 
-
-<!-- Init Select2 -->
 <script>
-    console.log("Running")
+    console.log("Running expense partial");
+
     $(document).ready(function () {
         $('.searchable-select').select2();
     });
