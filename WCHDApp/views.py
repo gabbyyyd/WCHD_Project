@@ -3021,32 +3021,30 @@ def insurancePercentageTableUpdate(request):
     return render(request, "WCHDApp/partials/insurancePercentageTablePartial.html", context)
 
 
-def getFundFromProject(projectName):
+def getInsuranceFundFromClockifyRow(employee, projectName, departmentName=""):
     if not projectName:
         return None
 
-    projectName = " ".join(str(projectName).strip().split())
+    # Sick/vacation/holiday/comp should go to the employee's normal pay item fund
+    if isLeaveClockifyProject(projectName):
+        if employee and employee.payItem:
+            return employee.payItem.line.fund
+        return None
 
-    activity = ActivityList.objects.filter(program__iexact=projectName).select_related("fund").first()
-    if activity:
-        return activity.fund
+    activity = getActivityForClockifyRow(projectName, departmentName)
+
+    if not activity:
+        return None
+
+    item = getPayrollItemForClockifyRow(employee, activity, projectName)
+
+    if item:
+        return item.line.fund
 
     return None
 
 def getEmployeeFromClockifyName(userName):
-    if not userName:
-        return None
-
-    cleanedUserName = " ".join(str(userName).strip().split()).lower()
-
-    for employee in Employee.objects.all():
-        employeeName = f"{employee.first_name} {employee.surname}"
-        employeeName = " ".join(employeeName.strip().split()).lower()
-
-        if employeeName == cleanedUserName:
-            return employee
-
-    return None
+    return getPayrollEmployeeFromClockifyName(userName)
 
 
 def getMonthDateRange(year, month):
@@ -3100,7 +3098,7 @@ def rebuildInsuranceAllocations(year, month):
 def processInsurancePercentageImport(selectedFile):
     file = pd.read_csv(selectedFile)
 
-    requiredColumns = ["User", "Project", "Start Date", "End Date", "Duration (decimal)"]
+    requiredColumns = ["User", "Project", "Department", "Start Date", "End Date", "Duration (decimal)"]
     missingColumns = [col for col in requiredColumns if col not in file.columns]
 
     if missingColumns:
@@ -3121,6 +3119,7 @@ def processInsurancePercentageImport(selectedFile):
         userName = row["User"]
         projectName = row["Project"]
         durationValue = row["Duration (decimal)"]
+        departmentName = row["Department"]
 
         try:
             startDate = pd.to_datetime(row["Start Date"]).date()
@@ -3131,13 +3130,17 @@ def processInsurancePercentageImport(selectedFile):
             continue
 
         employee = getEmployeeFromClockifyName(userName)
+
         if not employee:
             skippedRows.append(f"No employee match for user: {userName}")
             continue
 
-        fund = getFundFromProject(projectName)
+        fund = getInsuranceFundFromClockifyRow(employee, projectName, departmentName)
+
         if not fund:
-            skippedRows.append(f"No fund match for project: {projectName}")
+            skippedRows.append(
+                f"No fund match for project: {projectName}, department: {departmentName}"
+            )
             continue
 
         employeeKey = employee.pk
@@ -3361,6 +3364,21 @@ def insuranceReports(request):
 
     return render(request, "WCHDApp/insuranceReports.html", context)
 
+def addFooter(canvas, doc):
+    canvas.saveState()
+
+    footerText1 = "340 Muskingum Dr, Suite B, Marietta OH 45750"
+    footerText2 = "740.374.2782  www.washingtongov.org/health"
+
+    canvas.setFont("Helvetica", 8)
+
+    pageWidth, pageHeight = landscape(letter)
+
+    canvas.drawCentredString(pageWidth / 2, 25, footerText1)
+    canvas.drawCentredString(pageWidth / 2, 13, footerText2)
+
+    canvas.restoreState()
+
 @permission_required('WCHDApp.has_full_access', raise_exception=True)
 def insuranceReportsPDF(request, year, month, report_type, insurance_type):
     buffer = BytesIO()
@@ -3402,6 +3420,14 @@ def insuranceReportsPDF(request, year, month, report_type, insurance_type):
         insuranceLabel = "Dental Insurance"
     else:
         insuranceLabel = "Health and Dental Insurance"
+
+    center_style = ParagraphStyle(
+        "CenterStyle",
+        parent=styles["Normal"],
+        fontSize=10,
+        leading=12,
+        alignment=1,  # 0 = left, 1 = center, 2 = right
+    )
 
     elements.append(Spacer(1, 12))
     elements.append(Paragraph("Washington County Health Department", title_style))
@@ -3515,9 +3541,7 @@ def insuranceReportsPDF(request, year, month, report_type, insurance_type):
 
         filename = f"insurance_for_auditor_{year}_{month:02d}.pdf"
 
-        elements.append(Paragraph("340 Muskingum Dr, Suite B, Marietta OH 45750"))
-
-    doc.build(elements)
+    doc.build(elements, onFirstPage=addFooter, onLaterPages=addFooter)
 
     buffer.seek(0)
     pdf_data = buffer.getvalue()
