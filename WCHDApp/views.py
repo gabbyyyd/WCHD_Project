@@ -52,7 +52,8 @@ import traceback
 from django.contrib.admin.models import LogEntry
 import csv
 from django.contrib.admin.views.decorators import staff_member_required
-
+from django.db import connection
+from django.core.management.color import no_style
 
 def generate_pdf(request, tableName):
     buffer = BytesIO()
@@ -684,6 +685,13 @@ def cleanDateValue(value):
 
     return value
 
+def resetPrimaryKeySequence(model):
+    sequenceSql = connection.ops.sequence_reset_sql(no_style(), [model])
+
+    with connection.cursor() as cursor:
+        for sql in sequenceSql:
+            cursor.execute(sql)
+
 def imports(request):
     message = ""
 
@@ -821,6 +829,21 @@ def imports(request):
                         obj.save()
                         importedCount += 1
 
+                    else:
+                        lookup = {
+                            pkName: cleanLine[pkName]
+                        }
+
+                        model.objects.update_or_create(
+                            **lookup,
+                            defaults=cleanLine
+                        )
+
+                        importedCount += 1
+
+                if tableName == "People":
+                    resetPrimaryKeySequence(model)
+
                 message = f"{tableName} imported successfully. Imported: {importedCount}. Skipped: {skippedCount}."
 
             except ObjectDoesNotExist as e:
@@ -927,71 +950,75 @@ def countyPayrollExport(request):
         fileName = request.POST.get('fileName')
 
         payrollModel = apps.get_model('WCHDApp', "Payroll")
-        entries = payrollModel.objects.select_related('employee', "ActivityList").filter(payperiod__payperiod_id = payperiod)
 
-        #Values for mapping codes later in code
+        entries = payrollModel.objects.select_related(
+            'employee',
+            "ActivityList"
+        ).filter(
+            payperiod__payperiod_id=payperiod
+        )
+
         employeeHoursByActivity = {}
-        codeMappings = {
-            "SICK": "S",
-            "COMP": "C",
-            "VAC": "V",
-            "HOLIDAY": "H"
-        }
-
-        secondaryMapping = {
-            "S": "S-SICK",
-            "C":  "C-COMPTIME",
-            "V": "V-VACATION",
-            "H": "H-HOLIDAY",
-            "R": "R-REGULAR PA"
-        }
 
         for entry in entries:
-            activityName = entry.ActivityList.program.upper()
-            #If the Activity contains a word that is present in codeMapping aka "SICK" it sets the paycode to the abbreviation
-            for keyword, code in codeMappings.items():
-                if keyword in activityName:
-                    paycode = code
-                    break
-                else:
-                    paycode = "R"
-            #Reverting back to a full name
-            paycodeName = secondaryMapping[paycode]
+            employee = entry.employee
+            clockifyProject = entry.clockify_project
+            paycodeName = entry.paycode or getClockifyPaycode(clockifyProject)
 
-            #Creating a dictionary that holds employees hours with paycodes as keys to make running totals
-            if paycodeName not in employeeHoursByActivity:
-                employeeHoursByActivity[paycodeName] = {}
+            if isLeaveClockifyProject(clockifyProject):
+                item = employee.payItem
 
-            if entry.employee in employeeHoursByActivity[paycodeName]:
-                employeeHoursByActivity[paycodeName][entry.employee] += entry.hours
             else:
-                employeeHoursByActivity[paycodeName][entry.employee] = entry.hours
+                activity = entry.ActivityList
 
-        #Creating the csv export
+                if not activity:
+                    raise ValidationError({
+                        "ActivityList": (
+                            f"Payroll entry is missing ActivityList for "
+                            f"{clockifyProject}"
+                        )
+                    })
+
+                item = getPayrollItemForClockifyRow(
+                    employee,
+                    activity,
+                    clockifyProject
+                )
+
+            accountDistribution = getAccountDistributionFromItem(item)
+
+            key = (
+                paycodeName,
+                employee,
+                accountDistribution,
+                employee.pay_rate,
+            )
+
+            if key not in employeeHoursByActivity:
+                employeeHoursByActivity[key] = Decimal("0.00")
+
+            employeeHoursByActivity[key] += entry.hours
+
         exportData = []
-        for activity, employeeDict in employeeHoursByActivity.items():
-            for employee, hours in employeeDict.items():
-                line = employee.payItem.line
-                fullID = line.line_id
-                splitID = fullID.split("-")
-                if len(splitID)==3:
-                    year, fundID, lineID = splitID[0], splitID[1], splitID[2]
-                else:
-                    fundID, lineID = splitID[0], splitID[1]
-                
-                accountDistribution = f"{fundID}50290{lineID}"
-                exportData.append({
-                    "JobNumber": employee.employee_id,
-                    "Paycode": activity,
-                    "Time Group/Description": "",
-                    "Hours": hours,
-                    "HourlyRate": employee.pay_rate,
-                    "Salary": "",
-                    "AccountDistribution": accountDistribution
-                })
+
+        for key, hours in employeeHoursByActivity.items():
+            paycodeName, employee, accountDistribution, hourlyRate = key
+
+            exportData.append({
+                "JobNumber": employee.employee_id,
+                "Paycode": paycodeName,
+                "Time Group/Description": "",
+                "Hours": hours,
+                "HourlyRate": hourlyRate,
+                "Salary": "",
+                "AccountDistribution": accountDistribution
+            })
+
         exportData = pd.DataFrame(exportData)
+
         response = HttpResponse(content_type='text/csv')
         response['Content-Disposition'] = f'attachment; filename="{fileName}.csv"'
+
         exportData.to_csv(path_or_buf=response, index=False)
 
         return response
@@ -999,6 +1026,7 @@ def countyPayrollExport(request):
     context = {
         "payperiods": payperiods
     }
+
     return render(request, "WCHDApp/countyPayrollExport.html", context)
 
 #This is for revenue but was named previous to table split
@@ -1590,13 +1618,405 @@ def checkPrivileges(request):
 def noPrivileges(request, exception):
     return render(request, "WCHDApp/noPrivileges.html")
 
+EMPLOYEE_NAME_ALIASES = {
+    "Sherry": "Sherry Ellem",
+}
+
+def cleanClockifyEmployeeName(name):
+    if not name:
+        return ""
+
+    name = str(name).strip()
+
+    # Remove anything after comma.
+    # Example: "Joshua P. Lane, RS" -> "Joshua P. Lane"
+    name = name.split(",")[0].strip()
+
+    # Remove periods.
+    # Example: "Joshua P. Lane" -> "Joshua P Lane"
+    name = name.replace(".", "")
+
+    # Remove extra spaces.
+    name = " ".join(name.split())
+
+    # Remove common credentials/titles if they appear as separate words.
+    wordsToRemove = [
+        "rs", "rn", "bsn", "mph", "md", "do", "phd",
+        "dr", "mr", "mrs", "ms", "miss"
+    ]
+
+    parts = name.split()
+    cleanedParts = []
+
+    for part in parts:
+        if part.lower() not in wordsToRemove:
+            cleanedParts.append(part)
+
+    return " ".join(cleanedParts).strip()
+
+
+def normalizeName(name):
+    if not name:
+        return ""
+
+    name = str(name).lower()
+    name = name.replace(".", "")
+    name = re.sub(r"[^a-z0-9 ]", "", name)
+    name = " ".join(name.split())
+
+    return name
+
+def cleanPersonName(name):
+    if not name:
+        return ""
+
+    name = str(name).strip()
+    name = name.replace(".", "")
+    name = " ".join(name.split())
+
+    wordsToRemove = [
+        "rs", "rn", "bsn", "mph", "md", "do", "phd",
+        "dr", "mr", "mrs", "ms", "miss"
+    ]
+
+    parts = name.split()
+    cleanedParts = []
+
+    for part in parts:
+        if part.lower() not in wordsToRemove:
+            cleanedParts.append(part)
+
+    return " ".join(cleanedParts).strip()
+
+def getPayrollEmployeeFromClockifyName(clockifyName):
+    Employee = apps.get_model("WCHDApp", "employee")
+
+    if normalizeName(clockifyName) == "sherry":
+        match = Employee.objects.filter(
+            first_name__icontains="Sherry",
+            surname__icontains="Ellem"
+        ).first()
+
+        if match:
+            return match
+
+        match = Employee.objects.filter(
+            first_name__icontains="Sherry Ellem"
+        ).first()
+
+        if match:
+            return match
+
+        raise ValidationError({
+            "employee": "Clockify has Sherry, but no Employee record matched Sherry Ellem."
+        })
+
+    cleanedClockifyName = cleanClockifyEmployeeName(clockifyName)
+    normalizedClockifyName = normalizeName(cleanedClockifyName)
+    print("ORIGINAL CLOCKIFY NAME:", clockifyName)
+    print("CLEANED CLOCKIFY NAME:", cleanedClockifyName)
+    print("NORMALIZED BEFORE ALIAS:", normalizedClockifyName)
+
+    # Special Clockify name fixes
+    if normalizedClockifyName in EMPLOYEE_NAME_ALIASES:
+        aliasName = EMPLOYEE_NAME_ALIASES[normalizedClockifyName]
+        normalizedAliasName = normalizeName(aliasName)
+
+        aliasParts = normalizedAliasName.split()
+        aliasFirst = aliasParts[0] if aliasParts else ""
+        aliasLast = aliasParts[-1] if len(aliasParts) > 1 else ""
+
+        for employee in Employee.objects.all():
+            employeeFirstName = normalizeName(employee.first_name)
+            employeeSurname = normalizeName(employee.surname)
+
+            employeeFullName = normalizeName(
+                f"{employee.first_name or ''} {employee.surname or ''}"
+            )
+
+            employeeFirstParts = employeeFirstName.split()
+            employeeFirstFirstWord = employeeFirstParts[0] if employeeFirstParts else ""
+
+            # Handles first_name="Sherry", surname="Ellem"
+            if employeeFullName == normalizedAliasName:
+                return employee
+
+            # Handles first_name="Sherry Ellem", surname blank
+            if employeeFirstName == normalizedAliasName:
+                return employee
+
+            # Handles first_name="Sherry", surname="Ellem"
+            if aliasFirst == employeeFirstFirstWord and aliasLast == employeeSurname:
+                return employee
+
+        raise ValidationError({
+            "employee": f"Alias '{aliasName}' was set for Clockify name '{clockifyName}', but no matching employee was found."
+        })
+
+    if not normalizedClockifyName:
+        raise ValidationError({
+            "employee": "Employee name is blank"
+        })
+
+    clockifyParts = normalizedClockifyName.split()
+    clockifyFirst = clockifyParts[0]
+    clockifyLast = clockifyParts[-1] if len(clockifyParts) > 1 else ""
+
+    possibleMatches = []
+
+    for employee in Employee.objects.all():
+        employeeFirstName = normalizeName(employee.first_name)
+        employeeSurname = normalizeName(employee.surname)
+
+        employeeFullName = normalizeName(
+            f"{employee.first_name or ''} {employee.surname or ''}"
+        )
+
+        employeeFirstParts = employeeFirstName.split()
+        employeeFirstFirstWord = employeeFirstParts[0] if employeeFirstParts else ""
+
+        # Case 1: exact full-name match
+        # Example: "Jordan Brittany Knoch" == "Jordan Brittany Knoch"
+        if normalizedClockifyName == employeeFullName:
+            possibleMatches.append(employee)
+            continue
+
+        # Case 2: Clockify has first + last, and Employee first_name may contain middle initial/name
+        # Example: Clockify "Alyssa Lewis"
+        # Employee first_name "Alyssa R", surname "Lewis"
+        #
+        # Example: Clockify "Jordan Knoch"
+        # Employee first_name "Jordan Brittany", surname "Knoch"
+        if clockifyLast:
+            if clockifyFirst == employeeFirstFirstWord and clockifyLast == employeeSurname:
+                possibleMatches.append(employee)
+                continue
+
+        # Case 3: Clockify includes middle name, Employee only has first + last
+        # Example: Clockify "Joshua P Lane"
+        # Employee first_name "Joshua", surname "Lane"
+        if len(clockifyParts) >= 2:
+            if clockifyFirst == employeeFirstName and clockifyLast == employeeSurname:
+                possibleMatches.append(employee)
+                continue
+
+        # Case 4: Employee has no last name, Clockify only has first name
+        # Example: Clockify "Sherry"
+        # Employee first_name "Sherry", surname blank
+        if len(clockifyParts) == 1:
+            if clockifyFirst == employeeFirstFirstWord and employeeSurname == "":
+                possibleMatches.append(employee)
+                continue
+
+    if len(possibleMatches) == 1:
+        return possibleMatches[0]
+
+    if len(possibleMatches) > 1:
+        names = ", ".join(str(employee) for employee in possibleMatches)
+
+        raise ValidationError({
+            "employee": (
+                f"Multiple employees matched Clockify name '{clockifyName}': {names}"
+            )
+        })
+
+    raise ValidationError({
+        "employee": (
+            f"No employee found for Clockify name '{clockifyName}'."
+            f"Cleaned name was '{cleanedClockifyName}'. "
+            f"Normalized name was '{normalizedClockifyName}'."
+        )
+    })
+
+def cleanClockifyProjectName(projectName):
+    if not projectName:
+        return ""
+
+    projectName = " ".join(str(projectName).strip().split())
+
+    # Example: "Food Service out" becomes "Food Service"
+    if projectName.lower().endswith(" out"):
+        projectName = projectName[:-4].strip()
+
+    # Add small fixes here if Clockify names are slightly different
+    clockifyNameFixes = {
+        "Emergency Preparednesss": "Emergency Preparedness",
+        "Other Environmental": "ENV Other",
+        "Other Nursing": "PHN Other",
+    }
+
+    return clockifyNameFixes.get(projectName, projectName)
+
+
+def getClockifyPaycode(projectName):
+    cleanedProject = cleanClockifyProjectName(projectName).upper()
+
+    if "SICK" in cleanedProject:
+        return "S-SICK"
+
+    if "VAC" in cleanedProject or "VACATION" in cleanedProject:
+        return "V-VACATION"
+
+    if "HOLIDAY" in cleanedProject:
+        return "H-HOLIDAY"
+
+    if "COMP" in cleanedProject:
+        return "C-COMPTIME"
+
+    return "R-REGULAR PA"
+
+def isLeaveClockifyProject(projectName):
+    paycode = getClockifyPaycode(projectName)
+
+    return paycode in [
+        "S-SICK",
+        "V-VACATION",
+        "H-HOLIDAY",
+        "C-COMPTIME",
+    ]
+
+def getActivityFromClockifyProject(projectName):
+    ActivityList = apps.get_model("WCHDApp", "ActivityList")
+
+    cleanedProject = cleanClockifyProjectName(projectName)
+
+    if not cleanedProject:
+        return None
+
+    return ActivityList.objects.filter(
+        program__iexact=cleanedProject
+    ).first()
+
+
+def getPayrollItemForClockifyRow(employee, activity, clockifyProject):
+    # Sick/Vacation/Holiday/Comp do not need ActivityList.
+    # They should use the employee's normal pay item/admin fund.
+    if isLeaveClockifyProject(clockifyProject):
+        return employee.payItem
+
+    # Normal ActivityList logic
+    if activity.payType == "special":
+        return employee.specialPayItem
+
+    if activity.payType == "admin":
+        return employee.payItem
+
+    return activity.item
+
+
+def getAccountDistributionFromItem(item):
+    line = item.line
+    fullID = line.line_id
+    splitID = fullID.split("-")
+
+    if len(splitID) == 3:
+        year, fundID, lineID = splitID[0], splitID[1], splitID[2]
+    else:
+        fundID, lineID = splitID[0], splitID[1]
+
+    # Keep this exact format
+    accountDistribution = f"{fundID}50290{lineID}"
+
+    return accountDistribution
+
+def getPeopleForEmployee(employee):
+    PeopleModel = apps.get_model("WCHDApp", "People")
+
+    employeeFirstName = normalizeName(employee.first_name)
+    employeeSurname = normalizeName(employee.surname)
+
+    employeeFirstParts = employeeFirstName.split()
+    employeeFirstFirstWord = employeeFirstParts[0] if employeeFirstParts else ""
+
+    possibleMatches = []
+
+    for person in PeopleModel.objects.all():
+        personName = normalizeName(cleanPersonName(person.name))
+        personParts = personName.split()
+
+        if not personParts:
+            continue
+
+        personFirst = personParts[0]
+        personLast = personParts[-1] if len(personParts) > 1 else ""
+
+        # Exact match:
+        # Employee: Jordan Brittany Knoch
+        # People: Jordan Brittany Knoch
+        employeeFullName = normalizeName(
+            f"{employee.first_name or ''} {employee.surname or ''}"
+        )
+
+        if personName == employeeFullName:
+            possibleMatches.append(person)
+            continue
+
+        # First word of employee first_name + surname:
+        # Employee: Jordan Brittany + Knoch
+        # People: Jordan Knoch
+        if employeeSurname:
+            if personFirst == employeeFirstFirstWord and personLast == employeeSurname:
+                possibleMatches.append(person)
+                continue
+
+        # No surname case:
+        # Employee: Sherry
+        # People: Sherry
+        if not employeeSurname and personName == employeeFirstName:
+            possibleMatches.append(person)
+            continue
+
+    if len(possibleMatches) == 1:
+        return possibleMatches[0]
+
+    if len(possibleMatches) > 1:
+        names = ", ".join(str(person) for person in possibleMatches)
+
+        raise ValidationError({
+            "people": (
+                f"Multiple People objects matched employee "
+                f"{employee.first_name} {employee.surname}: {names}"
+            )
+        })
+
+    raise ValidationError({
+        "people": (
+            f"No People object found for employee "
+            f"{employee.first_name} {employee.surname}"
+        )
+    })
+
+def getActivityForClockifyRow(clockifyProject, clockifyDepartment):
+    ActivityList = apps.get_model("WCHDApp", "ActivityList")
+
+    cleanedProject = cleanClockifyProjectName(clockifyProject)
+
+    # First try matching the project directly
+    activity = ActivityList.objects.filter(
+        program__iexact=cleanedProject
+    ).first()
+
+    if activity:
+        return activity
+
+    # If no direct match, map unknown Administration department projects to Administration
+    cleanedDepartment = " ".join(str(clockifyDepartment or "").strip().split())
+
+    if cleanedDepartment.lower() == "administration":
+        return ActivityList.objects.filter(
+            program__iexact="Administration"
+        ).first()
+
+    return None
+
 @login_required
 @permission_required('WCHDApp.process_payroll', raise_exception=True)
 def clockifyImportPayroll(request, *args, **kwargs):
     message = ""
 
     fieldMap = {
-        "Project": "ActivityList",
+        "Project": "clockify_project",
+        "Department": "clockify_department",
         "User": "employee",
         "Start Date": "beg_date",
         "End Date": "end_date",
@@ -1614,6 +2034,22 @@ def clockifyImportPayroll(request, *args, **kwargs):
             try:
                 file = pd.read_csv(selectedFile)
                 file.dropna(how='all', inplace=True)
+                originalRowCount = len(file)
+
+                file = file[
+                    file["Approval"].astype(str).str.strip().str.lower() == "approved"
+                ]
+
+                approvedRowCount = len(file)
+                skippedRowCount = originalRowCount - approvedRowCount
+
+                if file.empty:
+                    message = "No approved rows found in the Clockify file."
+                    return render(
+                        request,
+                        "WCHDApp/clockifyImportPayroll.html",
+                        {"form": form, "message": message}
+                    )
             except Exception as e:
                 message = f"Could not read file: {e}"
                 return render(
@@ -1625,23 +2061,15 @@ def clockifyImportPayroll(request, *args, **kwargs):
             data = []
 
             payrollModel = apps.get_model('WCHDApp', 'Payroll')
-            fields = payrollModel._meta.get_fields()
+            payPeriodModel = apps.get_model('WCHDApp', 'PayPeriod')
 
-            fks = []
-            for field in fields:
-                if field.is_relation:
-                    fks.append(field.name)
-
-            # Keep original CSV column names separate
             source_columns = list(file.columns)
 
-            # Build list 
             mapped_columns = []
             for source_col in source_columns:
                 if source_col in fieldMap:
                     mapped_columns.append((source_col, fieldMap[source_col]))
 
-            # Build dictionaries
             for _, row in file.iterrows():
                 row_dict = {}
 
@@ -1661,21 +2089,20 @@ def clockifyImportPayroll(request, *args, **kwargs):
                         try:
                             newDate = datetime.strptime(str(value), "%m/%d/%Y").date()
                         except ValueError:
-                            raise ValidationError(
-                                {"payperiod": f"Invalid date format in {source_col}: {value}"}
-                            )
+                            raise ValidationError({
+                                "payperiod": f"Invalid date format in {source_col}: {value}"
+                            })
 
                         row_dict[model_col] = newDate
 
-                        # Find pay period
-                        # Aquired from input date
-                        payPeriodModel = apps.get_model('WCHDApp', 'PayPeriod')
-                        periods = payPeriodModel.objects.all()
+                        period = payPeriodModel.objects.filter(
+                            periodStart__lte=newDate,
+                            periodEnd__gte=newDate
+                        ).first()
 
-                        for period in periods:
-                            if period.periodStart <= newDate <= period.periodEnd:
-                                row_dict["payperiod"] = period
-                                break
+                        if period:
+                            row_dict["payperiod"] = period
+
                     else:
                         row_dict[model_col] = value
 
@@ -1686,158 +2113,117 @@ def clockifyImportPayroll(request, *args, **kwargs):
                 with transaction.atomic():
                     for line in data:
                         if 'payperiod' not in line:
-                            raise ValidationError({"payperiod": "No payperiod for this date range"})
+                            raise ValidationError({
+                                "payperiod": "No payperiod for this date range"
+                            })
 
-                        # Convert types
+                        # Convert numpy types
                         for key in list(line.keys()):
                             if isinstance(line[key], np.integer):
                                 line[key] = int(line[key])
                             elif isinstance(line[key], np.floating):
                                 line[key] = float(line[key])
 
-                        # Foreign keys
-                        for key in list(line.keys()):
-                            if key not in fks:
-                                continue
+                        # Match employee from Clockify User column
+                        clockifyUser = line["employee"]
 
-                            parentModel = apps.get_model('WCHDApp', key)
+                        paidEmployee = getPayrollEmployeeFromClockifyName(clockifyUser)
 
-                            if key == "employee":
-                                full_name = str(line[key]).strip()
+                        if not paidEmployee:
+                            raise ValidationError({
+                                "employee": f"No employee found for Clockify name '{clockifyUser}'"
+                            })
 
-                                # Remove after comma
-                                full_name = full_name.split(",")[0].strip()
+                        line["employee"] = paidEmployee
 
-                                parts = full_name.split()
-                                if len(parts) == 0:
-                                    raise ValidationError({"employee": "Employee name is blank"})
+                        # Clockify project/paycode logic
+                        clockifyProject = str(line["clockify_project"]).strip()
+                        clockifyDepartment = str(line.get("clockify_department", "")).strip()
 
-                                first_name = parts[0]
-                                surname = parts[-1] if len(parts) > 1 else None
+                        paycode = getClockifyPaycode(clockifyProject)
+                        line["paycode"] = paycode
 
-                                if surname:
-                                    matches = parentModel.objects.filter(
-                                        first_name__iexact=first_name,
-                                        surname__iexact=surname
-                                    )
-                                else:
-                                    matches = parentModel.objects.filter(
-                                        first_name__iexact=first_name
-                                    )
-
-                                if matches.count() == 0 and len(parts) > 1:
-                                    # Fallback: first name only
-                                    matches = parentModel.objects.filter(
-                                        first_name__iexact=first_name
-                                    )
-
-                                if matches.count() == 0:
-                                    raise ValidationError(
-                                        {"employee": f"No employee found for {full_name}"}
-                                    )
-                                elif matches.count() > 1:
-                                    raise ValidationError(
-                                        {"employee": f"Multiple employees matched {full_name}"}
-                                    )
-
-                                line[key] = matches.first()
-
-                            elif key == "ActivityList":
-                                project_value = str(line[key]).strip()
-
-                                try:
-                                    line[key] = parentModel.objects.get(program=project_value)
-                                except parentModel.DoesNotExist:
-                                    raise ValidationError(
-                                        {"ActivityList": f"No ActivityList found for project {project_value}"}
-                                    )
-                                except parentModel.MultipleObjectsReturned:
-                                    raise ValidationError(
-                                        {"ActivityList": f"Multiple ActivityList rows found for project {project_value}"}
-                                    )
-
-                            elif key == "dept":
-                                try:
-                                    line[key] = parentModel.objects.get(dept_name=line[key])
-                                except parentModel.DoesNotExist:
-                                    raise ValidationError({"dept": "Department does not exist"})
-                                except parentModel.MultipleObjectsReturned:
-                                    raise ValidationError({"dept": "Multiple departments matched"})
-
-                        activity = line['ActivityList']
-                        paidEmployee = line['employee']
-
-                        payType = activity.payType
-                        if payType == "special":
-                            item = paidEmployee.specialPayItem
-                        elif payType == "admin":
+                        if isLeaveClockifyProject(clockifyProject):
+                            activity = None
+                            line["ActivityList"] = None
                             item = paidEmployee.payItem
-                        else:
-                            item = activity.item
 
+                        else:
+                            activity = getActivityForClockifyRow(clockifyProject, clockifyDepartment)
+
+                            if not activity:
+                                cleanedProject = cleanClockifyProjectName(clockifyProject)
+
+                                raise ValidationError({
+                                    "ActivityList": (
+                                        f"No ActivityList found for Clockify project '{clockifyProject}'. "
+                                        f"Cleaned name was '{cleanedProject}'. "
+                                        f"Clockify department was '{clockifyDepartment}'."
+                                    )
+                                })
+
+                            line["ActivityList"] = activity
+                            item = getPayrollItemForClockifyRow(
+                                paidEmployee,
+                                activity,
+                                clockifyProject
+                            )
+
+                        if not item:
+                            raise ValidationError({
+                                "item": f"No payroll item found for {paidEmployee}"
+                            })
+
+                        # Calculate amount
                         payRate = Decimal(str(paidEmployee.pay_rate))
                         hours = Decimal(str(line["hours"]))
 
                         amount = payRate * hours
-                        amount = amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+                        amount = amount.quantize(
+                            Decimal("0.01"),
+                            rounding=ROUND_HALF_UP
+                        )
 
-                        # Match people
-                        try:
-                            people = People.objects.get(
-                                name=f"{paidEmployee.first_name} {paidEmployee.surname}".strip()
-                            )
-                        except People.DoesNotExist:
-                            raise ValidationError(
-                                {"people": f"No People object found for {paidEmployee.first_name} {paidEmployee.surname}"}
-                            )
-                        except People.MultipleObjectsReturned:
-                            raise ValidationError(
-                                {"people": f"Multiple People objects found for {paidEmployee.first_name} {paidEmployee.surname}"}
-                            )
+                        # Match People object
+                        people = getPeopleForEmployee(paidEmployee)
+
+                        # Activity ID cannot be used for leave rows because activity is None
+                        activityID = activity.ActivityList_id if activity else paycode
 
                         expenseFullID = (
                             f"{paidEmployee.employee_id}-"
-                            f"{activity.ActivityList_id}-"
+                            f"{activityID}-"
                             f"{line['beg_date']}-"
                             f"{line['startTime']}"
                         )
 
-                        duplicate = Expense.objects.filter(expenseFullID=expenseFullID).exists()
+                        duplicate = Expense.objects.filter(
+                            expenseFullID=expenseFullID
+                        ).exists()
 
                         if not duplicate:
-                            if dateInputted == "":
-                                expense = Expense(
-                                    item=item,
-                                    amount=amount,
-                                    people=people,
-                                    warrant=1,
-                                    comment="Payroll",
-                                    ActivityList=activity,
-                                    line=item.line,
-                                    employee=paidEmployee,
-                                    expenseFullID=expenseFullID
-                                )
-                            else:
-                                expense = Expense(
-                                    item=item,
-                                    date=dateInputted,
-                                    amount=amount,
-                                    people=people,
-                                    warrant=1,
-                                    comment="Payroll",
-                                    ActivityList=activity,
-                                    line=item.line,
-                                    employee=paidEmployee,
-                                    expenseFullID=expenseFullID
-                                )
+                            expenseDate = dateInputted if dateInputted else line["beg_date"]
+
+                            expense = Expense(
+                                item=item,
+                                date=expenseDate,
+                                amount=amount,
+                                people=people,
+                                warrant=1,
+                                comment="Payroll",
+                                ActivityList=activity,
+                                line=item.line,
+                                employee=paidEmployee,
+                                expenseFullID=expenseFullID
+                            )
 
                             expense.full_clean()
                             expense.save()
-                            message = "Posted"
 
-                        # Only used for duplicates
+                        # Payroll model does not have startTime
                         line.pop("startTime", None)
 
+                        # Format payroll money/hours
                         if "pay_amount" in line and line["pay_amount"] is not None:
                             line["pay_amount"] = Decimal(str(line["pay_amount"])).quantize(
                                 Decimal("0.01"),
@@ -1848,15 +2234,22 @@ def clockifyImportPayroll(request, *args, **kwargs):
                             line["hours"] = Decimal(str(line["hours"])).quantize(
                                 Decimal("0.01"),
                                 rounding=ROUND_HALF_UP
-    )
+                            )
 
                         payrollModel.objects.update_or_create(
-                            **line,
+                            employee=line["employee"],
+                            beg_date=line["beg_date"],
+                            end_date=line["end_date"],
+                            clockify_project=line["clockify_project"],
+                            hours=line["hours"],
                             defaults=line
                         )
 
+                    message = "Posted"
+
             except ValidationError as e:
                 message = e.message_dict
+
                 if message.get("warrant"):
                     message = message['warrant'][0]
                 elif message.get("item"):
@@ -1875,8 +2268,12 @@ def clockifyImportPayroll(request, *args, **kwargs):
                     message = message['payperiod'][0]
                 elif message.get("dept"):
                     message = message['dept'][0]
+                else:
+                    message = str(message)
+
             except Exception as e:
                 message = f"Import failed: {e}"
+
     else:
         form = FileInput()
 

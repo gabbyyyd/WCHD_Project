@@ -586,7 +586,7 @@ class Payroll(models.Model):
         Employee, on_delete=models.CASCADE, verbose_name="Employee"
     )
     ActivityList = models.ForeignKey(
-        ActivityList, on_delete=models.CASCADE, verbose_name="Activity List"
+        ActivityList, on_delete=models.SET_NULL, null=True, blank=True, verbose_name="Activity List"
     )
     # going to get fund from activity list
     # fund = models.ForeignKey(Fund, on_delete=models.CASCADE)
@@ -597,6 +597,28 @@ class Payroll(models.Model):
     payperiod = models.ForeignKey(
         PayPeriod, on_delete=models.PROTECT, verbose_name="Pay Period"
     )
+
+    clockify_project = models.CharField(
+    max_length=100,
+    null=True,
+    blank=True,
+    verbose_name="Clockify Project"
+    )
+
+    paycode = models.CharField(
+        max_length=50,
+        null=True,
+        blank=True,
+        verbose_name="Paycode"
+    )
+
+    clockify_department = models.CharField(
+    max_length=100,
+    null=True,
+    blank=True,
+    verbose_name="Clockify Department"
+    )
+    
     # I think all of these will be properties instead
     # vacation_used = models.DecimalField(max_digits=6, decimal_places=2, verbose_name="Vacation Used")
     # sick_used = models.DecimalField(max_digits=6, decimal_places=2, verbose_name="Sick Used")
@@ -947,7 +969,7 @@ class Expense(models.Model):
     warrant = models.IntegerField(verbose_name="Warrant")
     comment = models.CharField(max_length=500, verbose_name="Comment")
     ActivityList = models.ForeignKey(
-        ActivityList, on_delete=models.PROTECT, verbose_name="Activity List"
+        ActivityList, on_delete=models.SET_NULL, null=True, blank=True, verbose_name="Activity List"
     )
     line = models.ForeignKey(Line, on_delete=models.PROTECT, verbose_name="Line")
     # odhafr = models.CharField(max_length=50, verbose_name="ODH AFR")
